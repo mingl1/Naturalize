@@ -11,7 +11,6 @@ document.addEventListener("DOMContentLoaded", () => {
   // Log message helper
   function addConsoleLog(text, type = "info") {
     const p = document.createElement("p");
-    p.className = "space-y-1";
     
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     
@@ -19,10 +18,10 @@ document.addEventListener("DOMContentLoaded", () => {
       p.className = "text-brand-emerald";
       p.textContent = `[${timestamp}] [success] ${text}`;
     } else if (type === "error") {
-      p.className = "text-red-400";
+      p.className = "text-rose-400";
       p.textContent = `[${timestamp}] [error] ${text}`;
     } else {
-      p.className = "text-slate-400";
+      p.className = "text-slate-300";
       p.textContent = `[${timestamp}] [log] ${text}`;
     }
     

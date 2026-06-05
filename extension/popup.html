@@ -4,98 +4,51 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Antigravity Scrape-as-Code Engine</title>
-  <!-- Tailwind CSS via CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
   <!-- Google Fonts Outfit & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Outfit', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
-          },
-          colors: {
-            brand: {
-              dark: '#0b0a1a',
-              card: '#121124',
-              violet: '#8b5cf6',
-              fuchsia: '#d946ef',
-              emerald: '#10b981',
-            }
-          }
-        }
-      }
-    }
-  </script>
-  <style>
-    body {
-      width: 340px;
-      height: 480px;
-      background: radial-gradient(circle at top right, rgba(139, 92, 246, 0.15), transparent 60%),
-                  radial-gradient(circle at bottom left, rgba(217, 70, 239, 0.1), transparent 60%),
-                  #0b0a1a;
-      overflow: hidden;
-    }
-    .glassmorphism {
-      background: rgba(18, 17, 36, 0.65);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-    }
-    .neon-glow {
-      box-shadow: 0 0 15px rgba(139, 92, 246, 0.35);
-    }
-    .custom-scrollbar::-webkit-scrollbar {
-      width: 4px;
-    }
-    .custom-scrollbar::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    .custom-scrollbar::-webkit-scrollbar-thumb {
-      background: rgba(139, 92, 246, 0.3);
-      border-radius: 2px;
-    }
-  </style>
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="popup.css">
 </head>
-<body class="text-slate-100 font-sans p-4 flex flex-col h-full select-none">
+<body>
   
   <!-- Header -->
-  <div class="flex items-center justify-between mb-4">
-    <div class="flex items-center gap-2">
-      <img src="icon.png" alt="Antigravity Logo" class="w-8 h-8 rounded-lg border border-brand-violet/30 neon-glow">
-      <div>
-        <h1 class="text-sm font-semibold tracking-wide bg-gradient-to-r from-violet-400 to-fuchsia-400 bg-clip-text text-transparent">ANTIGRAVITY</h1>
-        <p class="text-[10px] text-slate-400 uppercase tracking-widest font-mono">Scrape-As-Code v0.1.0</p>
+  <header class="header">
+    <div class="logo-container">
+      <img src="icon.png" alt="Antigravity Logo" class="logo-img">
+      <div class="logo-text">
+        <h1>ANTIGRAVITY</h1>
+        <p>Scrape-As-Code v0.1.0</p>
       </div>
     </div>
-    <div class="flex items-center gap-1.5">
-      <span class="w-2 h-2 rounded-full bg-brand-emerald animate-pulse"></span>
-      <span class="text-[11px] font-medium text-slate-300">Active</span>
+    <div class="status-badge">
+      <span class="status-dot"></span>
+      <span class="status-text">Active</span>
     </div>
-  </div>
+  </header>
 
   <!-- Main Card -->
-  <div class="glassmorphism rounded-xl p-4 flex-1 flex flex-col gap-4 mb-4">
+  <main class="main-card">
     <!-- Extension status -->
     <div>
-      <span class="text-[10px] text-slate-400 uppercase tracking-widest font-mono font-bold">Workspace Engine</span>
-      <div class="mt-1 flex items-center justify-between">
-        <span class="text-sm font-semibold">Visual Element Locator</span>
-        <label class="relative inline-flex items-center cursor-pointer">
-          <input type="checkbox" id="toggle-hover" class="sr-only peer" checked>
-          <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-slate-300 after:border-slate-300 after:border after:rounded-full after:height-4 after:h-4 after:width-4 after:w-4 after:transition-all peer-checked:bg-brand-violet peer-checked:after:bg-white peer-checked:after:border-white"></div>
+      <span class="section-title">Workspace Engine</span>
+      <div class="locator-control">
+        <span class="locator-label">Visual Element Locator</span>
+        <label class="switch">
+          <input type="checkbox" id="toggle-hover" checked>
+          <span class="slider"></span>
         </label>
       </div>
     </div>
 
     <!-- Instruction Info -->
-    <div class="p-3 rounded-lg bg-white/5 border border-white/5 text-xs text-slate-300 space-y-2 leading-relaxed">
-      <p>💡 <span class="font-semibold text-violet-300">How to use:</span></p>
-      <ol class="list-decimal pl-4 space-y-1.5">
+    <div class="instructions-box">
+      <div class="instructions-title-container">
+        <span class="text-brand-violet">💡</span>
+        <span class="instructions-title">How to use:</span>
+      </div>
+      <ol class="instructions-list">
         <li>Hover your cursor over any item or section on the web page.</li>
         <li>Observe the neon indicator bounding boxes tracking target elements.</li>
         <li>Click a listing item to capture its visual node context.</li>
@@ -103,24 +56,24 @@
     </div>
 
     <!-- Integration Terminal -->
-    <div class="flex-1 rounded-lg bg-black/40 border border-white/5 p-3 font-mono text-[10px] text-slate-400 overflow-y-auto custom-scrollbar flex flex-col justify-end">
-      <div class="space-y-1" id="console-logs">
+    <div class="terminal custom-scrollbar">
+      <div class="console-logs" id="console-logs">
         <p class="text-brand-violet">[system] Initializing Scrape-as-Code control plane...</p>
         <p class="text-brand-emerald">[success] Chrome extension boilerplate active</p>
-        <p class="text-slate-500">[log] Awaiting user hover/click interaction...</p>
+        <p class="text-slate-400">[log] Awaiting user hover/click interaction...</p>
       </div>
     </div>
-  </div>
+  </main>
 
   <!-- Actions & Footer -->
-  <div class="flex items-center justify-between">
-    <a href="https://github.com" target="_blank" class="text-[11px] text-slate-400 hover:text-violet-300 transition-colors flex items-center gap-1 font-mono">
+  <footer class="footer">
+    <a href="https://github.com" target="_blank" class="footer-link">
       <span>⚙️</span> Docs & API
     </a>
-    <button id="reset-session" class="text-xs bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 text-white font-semibold py-1.5 px-4 rounded-lg shadow-lg hover:shadow-violet-500/20 transition-all active:scale-95">
+    <button id="reset-session" class="btn-primary">
       Refresh Highlights
     </button>
-  </div>
+  </footer>
 
   <!-- Script inclusion -->
   <script src="popup.js"></script>
