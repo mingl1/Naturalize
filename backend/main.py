@@ -106,11 +106,54 @@ def execute_parser(request: ExecutionRequest):
             sdk_class = local_namespace.get("AgenticCatalogSDK")
             if sdk_class:
                 sdk_instance = sdk_class()
-                sdk_instance.bulk_upsert(
-                    collection_name=request.collection_name or "catalog_items",
-                    data=extracted_items,
-                    unique_key=request.unique_key or "title",
-                )
+                import inspect
+                try:
+                    sig = inspect.signature(sdk_instance.bulk_upsert)
+                    params = sig.parameters
+                    
+                    kwargs = {}
+                    # Match collection_name or collection
+                    if "collection_name" in params:
+                        kwargs["collection_name"] = request.collection_name or "catalog_items"
+                    elif "collection" in params:
+                        kwargs["collection"] = request.collection_name or "catalog_items"
+                    
+                    # Match data, items, or catalog_items
+                    if "data" in params:
+                        kwargs["data"] = extracted_items
+                    elif "items" in params:
+                        kwargs["items"] = extracted_items
+                    elif "catalog_items" in params:
+                        kwargs["catalog_items"] = extracted_items
+                    
+                    # Match unique_key or key
+                    if "unique_key" in params:
+                        kwargs["unique_key"] = request.unique_key or "title"
+                    elif "key" in params:
+                        kwargs["key"] = request.unique_key or "title"
+                    
+                    if kwargs:
+                        sdk_instance.bulk_upsert(**kwargs)
+                    else:
+                        # Fallback to positional arguments if keywords could not be matched
+                        sdk_instance.bulk_upsert(
+                            request.collection_name or "catalog_items",
+                            extracted_items,
+                            request.unique_key or "title"
+                        )
+                except Exception as sdk_err:
+                    # Fallback to positional calls if signature inspection fails
+                    try:
+                        sdk_instance.bulk_upsert(
+                            request.collection_name or "catalog_items",
+                            extracted_items,
+                            request.unique_key or "title"
+                        )
+                    except TypeError:
+                        try:
+                            sdk_instance.bulk_upsert(extracted_items, request.unique_key or "title")
+                        except TypeError:
+                            sdk_instance.bulk_upsert(extracted_items)
 
         logs = stdout_buffer.getvalue()
         return ExecutionResponse(

@@ -22,6 +22,33 @@
   let inferredSelectors = null;
   let nextButtonSelector = "";
   let isSelectingNextButton = false;
+  let isGeneratingCode = false;
+  let isPaginationActive = false;
+
+  // Check if extension context is valid
+  function isContextValid() {
+    return typeof chrome !== "undefined" && chrome.runtime && !!chrome.runtime.id;
+  }
+
+  // Updates the Generate Parser button disabled state based on pagination settings and generation state
+  function updateCodegenButtonState() {
+    const codegenBtn = document.getElementById("ag-codegen-btn");
+    if (!codegenBtn) return;
+
+    if (isGeneratingCode || isPaginationActive) {
+      codegenBtn.disabled = true;
+      return;
+    }
+
+    const isPaginateEnabled = document.getElementById("ag-paginate-toggle")?.checked;
+    if (isPaginateEnabled && !nextButtonSelector) {
+      codegenBtn.disabled = true;
+      codegenBtn.title = "Please select a Next Page Button before generating parser.";
+    } else {
+      codegenBtn.disabled = false;
+      codegenBtn.removeAttribute("title");
+    }
+  }
 
   // Create hover highlight overlay container
   const overlay = document.createElement("div");
@@ -316,6 +343,7 @@
           selectBtn.classList.add("ag-btn-secondary");
         }
         overlay.style.display = "none";
+        updateCodegenButtonState();
         return;
       }
 
@@ -455,13 +483,13 @@
       });
 
       if (type === "success") {
-        p.style.color = "#34d399";
+        p.className = "ag-log-success";
         p.textContent = `[${timestamp}] [success] ${text}`;
       } else if (type === "error") {
-        p.style.color = "#fb7185";
+        p.className = "ag-log-error";
         p.textContent = `[${timestamp}] [error] ${text}`;
       } else {
-        p.style.color = "#cbd5e1";
+        p.className = "ag-log-info";
         p.textContent = `[${timestamp}] [log] ${text}`;
       }
 
@@ -469,12 +497,16 @@
       panelLogs.scrollTop = panelLogs.scrollHeight;
     }
 
-    if (chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime
-        .sendMessage({ action: "logUpdate", text, type })
-        .catch(() => {
-          // Ignore failures when the extension popup is not open
-        });
+    if (isContextValid() && chrome.runtime.sendMessage) {
+      try {
+        chrome.runtime
+          .sendMessage({ action: "logUpdate", text, type })
+          .catch(() => {
+            // Ignore failures when the extension popup is not open
+          });
+      } catch (e) {
+        // Ignore failures gracefully when the extension context is invalidated
+      }
     }
   }
 
@@ -557,13 +589,20 @@
   function runCodeGen() {
     if (!selectedParent) return;
 
+    const isPaginateEnabled = document.getElementById("ag-paginate-toggle")?.checked;
+    if (isPaginateEnabled && !nextButtonSelector) {
+      addPanelLog("Please select a Next Page Button before generating parser.", "error");
+      return;
+    }
+
     addPanelLog("Starting parsing pipeline...", "info");
     addPanelLog(
       "Cleaning and sanitizing HTML snippet (removing scripts/media/base64)...",
     );
     const htmlSnippet = cleanHtmlSnippet(selectedParent);
 
-    document.getElementById("ag-codegen-btn").disabled = true;
+    isGeneratingCode = true;
+    updateCodegenButtonState();
     document.getElementById("ag-execute-btn").disabled = true;
     document.getElementById("ag-code-view").textContent =
       "# Code generation in progress...";
@@ -589,7 +628,8 @@
         return res.json();
       })
       .then((data) => {
-        document.getElementById("ag-codegen-btn").disabled = false;
+        isGeneratingCode = false;
+        updateCodegenButtonState();
 
         if (data.success) {
           generatedCode = data.generated_code;
@@ -606,6 +646,7 @@
             `Inferred Selectors: ${JSON.stringify(inferredSelectors)}`,
             "success",
           );
+          autoSaveParser(generatedCode, inferredSelectors);
         } else {
           addPanelLog(
             `Backend failed to generate code: ${data.message}`,
@@ -616,7 +657,8 @@
         }
       })
       .catch((err) => {
-        document.getElementById("ag-codegen-btn").disabled = false;
+        isGeneratingCode = false;
+        updateCodegenButtonState();
         addPanelLog(`Failed to connect to FastAPI: ${err.message}`, "error");
         addPanelLog(
           "Please check if the backend is running at http://127.0.0.1:8000",
@@ -625,6 +667,51 @@
         document.getElementById("ag-code-view").textContent =
           `# Connection Error:\n# Could not reach FastAPI server at http://127.0.0.1:8000\n# Error: ${err.message}`;
       });
+  }
+
+  /**
+   * Auto-saves the generated parser code to chrome.storage.local
+   */
+  function autoSaveParser(code, selectors) {
+    if (!isContextValid() || !chrome.storage || !chrome.storage.local) {
+      addPanelLog("Extension context invalid; auto-save skipped.", "error");
+      return;
+    }
+
+    try {
+      chrome.storage.local.get(["ag_saved_parsers"], (result) => {
+        let parsers = result.ag_saved_parsers || [];
+        
+        const newParser = {
+          id: "parser_" + Date.now(),
+          url: window.location.href,
+          domain: window.location.hostname,
+          timestamp: Date.now(),
+          code: code,
+          selectors: selectors,
+          title: document.title || window.location.hostname
+        };
+
+        const existingIdx = parsers.findIndex(p => p.code === code);
+        if (existingIdx !== -1) {
+          parsers[existingIdx].timestamp = Date.now();
+          parsers[existingIdx].url = window.location.href;
+          parsers[existingIdx].title = document.title || window.location.hostname;
+        } else {
+          parsers.unshift(newParser);
+        }
+
+        if (parsers.length > 50) {
+          parsers = parsers.slice(0, 50);
+        }
+
+        chrome.storage.local.set({ ag_saved_parsers: parsers }, () => {
+          addPanelLog("Parser automatically saved to history!", "success");
+        });
+      });
+    } catch (e) {
+      addPanelLog(`Failed to auto-save parser: ${e.message}`, "error");
+    }
   }
 
   /**
@@ -670,9 +757,21 @@
         delay: delay,
       };
 
-      chrome.storage.local.set({ ag_pagination_state: paginationState }, () => {
-        runPaginationLoop();
-      });
+      if (isContextValid() && chrome.storage && chrome.storage.local) {
+        try {
+          isPaginationActive = true;
+          updateCodegenButtonState();
+          chrome.storage.local.set({ ag_pagination_state: paginationState }, () => {
+            runPaginationLoop();
+          });
+        } catch (e) {
+          isPaginationActive = false;
+          updateCodegenButtonState();
+          addPanelLog("Failed to write state: context invalidated.", "error");
+        }
+      } else {
+        addPanelLog("Extension context is invalid. Please reload the page.", "error");
+      }
       return;
     }
 
@@ -743,66 +842,93 @@
    * Orchestrates the pagination loop step by step
    */
   function runPaginationLoop() {
-    if (!chrome.storage || !chrome.storage.local) return;
+    if (!isContextValid() || !chrome.storage || !chrome.storage.local) {
+      addPanelLog("Extension context is invalid. Aborting pagination loop.", "error");
+      isPaginationActive = false;
+      updateCodegenButtonState();
+      return;
+    }
 
-    chrome.storage.local.get(["ag_pagination_state"], (result) => {
-      const state = result.ag_pagination_state;
-      if (!state || !state.active) return;
+    try {
+      chrome.storage.local.get(["ag_pagination_state"], (result) => {
+        const state = result ? result.ag_pagination_state : null;
+        if (!state || !state.active) return;
 
-      if (state.current_page >= state.max_pages) {
+        if (state.current_page >= state.max_pages) {
+          addPanelLog(
+            "All requested pages captured. Submitting to backend parser...",
+            "success",
+          );
+          finishPagination(state);
+          return;
+        }
+
+        const nextBtn = document.querySelector(state.next_selector);
+        if (!nextBtn) {
+          addPanelLog(
+            `Next page button not found using selector: '${state.next_selector}'. Completing extraction early with ${state.collected_html.length} pages.`,
+            "error",
+          );
+          finishPagination(state);
+          return;
+        }
+
         addPanelLog(
-          "All requested pages captured. Submitting to backend parser...",
-          "success",
+          `Page ${state.current_page}/${state.max_pages} processed. Triggering navigation to next page...`,
+          "info",
         );
-        finishPagination(state);
-        return;
-      }
 
-      const nextBtn = document.querySelector(state.next_selector);
-      if (!nextBtn) {
-        addPanelLog(
-          `Next page button not found using selector: '${state.next_selector}'. Completing extraction early with ${state.collected_html.length} pages.`,
-          "error",
-        );
-        finishPagination(state);
-        return;
-      }
+        state.current_page += 1;
+        if (isContextValid() && chrome.storage && chrome.storage.local) {
+          try {
+            chrome.storage.local.set({ ag_pagination_state: state }, () => {
+              nextBtn.click();
 
-      addPanelLog(
-        `Page ${state.current_page}/${state.max_pages} processed. Triggering navigation to next page...`,
-        "info",
-      );
-
-      state.current_page += 1;
-      chrome.storage.local.set({ ag_pagination_state: state }, () => {
-        nextBtn.click();
-
-        setTimeout(() => {
-          chrome.storage.local.get(["ag_pagination_state"], (res) => {
-            const current_state = res.ag_pagination_state;
-            if (
-              current_state &&
-              current_state.active &&
-              current_state.current_page === state.current_page
-            ) {
-              addPanelLog(
-                `SPA/AJAX update detected. Capturing Page ${current_state.current_page}...`,
-                "info",
-              );
-              current_state.collected_html.push(
-                document.documentElement.outerHTML,
-              );
-              chrome.storage.local.set(
-                { ag_pagination_state: current_state },
-                () => {
-                  runPaginationLoop();
-                },
-              );
-            }
-          });
-        }, state.delay);
+              setTimeout(() => {
+                if (isContextValid() && chrome.storage && chrome.storage.local) {
+                  try {
+                    chrome.storage.local.get(["ag_pagination_state"], (res) => {
+                      const current_state = res ? res.ag_pagination_state : null;
+                      if (
+                        current_state &&
+                        current_state.active &&
+                        current_state.current_page === state.current_page
+                      ) {
+                        addPanelLog(
+                          `SPA/AJAX update detected. Capturing Page ${current_state.current_page}...`,
+                          "info",
+                        );
+                        current_state.collected_html.push(
+                          document.documentElement.outerHTML,
+                        );
+                        if (isContextValid() && chrome.storage && chrome.storage.local) {
+                          try {
+                            chrome.storage.local.set(
+                              { ag_pagination_state: current_state },
+                              () => {
+                                runPaginationLoop();
+                              },
+                            );
+                          } catch (e) {
+                            addPanelLog("Failed to write state: context invalidated.", "error");
+                          }
+                        }
+                      }
+                    });
+                  } catch (e) {
+                    addPanelLog("Failed to read state: context invalidated.", "error");
+                  }
+                }
+              }, state.delay);
+            });
+          } catch (e) {
+            addPanelLog("Failed to write state: context invalidated.", "error");
+          }
+        }
       });
-    });
+    } catch (e) {
+      addPanelLog("Failed to read state: context invalidated.", "error");
+    }
   }
 
   /**
@@ -815,11 +941,17 @@
       state.collection_name,
       state.unique_key,
     );
-    chrome.storage.local.remove(["ag_pagination_state"]);
+    if (isContextValid() && chrome.storage && chrome.storage.local) {
+      try {
+        chrome.storage.local.remove(["ag_pagination_state"]);
+      } catch (e) {
+        // Ignore cleanup failure
+      }
+    }
 
-    const codegenBtn = document.getElementById("ag-codegen-btn");
+    isPaginationActive = false;
+    updateCodegenButtonState();
     const executeBtn = document.getElementById("ag-execute-btn");
-    if (codegenBtn) codegenBtn.disabled = false;
     if (executeBtn) executeBtn.disabled = false;
   }
 
@@ -900,56 +1032,67 @@
    * Resumes a stored active pagination session after page navigation
    */
   function checkAndResumePagination() {
-    if (!chrome.storage || !chrome.storage.local) return;
-    chrome.storage.local.get(["ag_pagination_state"], (result) => {
-      const state = result.ag_pagination_state;
-      if (state && state.active) {
-        console.log(
-          "🔄 Antigravity: Resuming pagination session from storage...",
-          state,
-        );
+    if (!isContextValid() || !chrome.storage || !chrome.storage.local) return;
+    try {
+      chrome.storage.local.get(["ag_pagination_state"], (result) => {
+        const state = result ? result.ag_pagination_state : null;
+        if (state && state.active) {
+          console.log(
+            "🔄 Antigravity: Resuming pagination session from storage...",
+            state,
+          );
 
-        generatedCode = state.generated_code;
-        nextButtonSelector = state.next_selector;
+          isPaginationActive = true;
+          generatedCode = state.generated_code;
+          nextButtonSelector = state.next_selector;
 
-        injectPanel();
+          injectPanel();
 
-        const panel = document.getElementById("antigravity-depth-panel");
-        if (panel) {
-          panel.classList.add("active");
+          const panel = document.getElementById("antigravity-depth-panel");
+          if (panel) {
+            panel.classList.add("active");
 
-          document.getElementById("ag-paginate-toggle").checked = true;
-          document.getElementById("ag-pagination-controls").style.display =
-            "flex";
-          document.getElementById("ag-next-selector-input").value =
-            nextButtonSelector;
-          document.getElementById("ag-max-pages").value = state.max_pages;
-          document.getElementById("ag-page-delay").value = state.delay;
+            document.getElementById("ag-paginate-toggle").checked = true;
+            document.getElementById("ag-pagination-controls").style.display =
+              "flex";
+            document.getElementById("ag-next-selector-input").value =
+              nextButtonSelector;
+            document.getElementById("ag-max-pages").value = state.max_pages;
+            document.getElementById("ag-page-delay").value = state.delay;
 
-          document.getElementById("ag-codegen-btn").disabled = true;
-          document.getElementById("ag-execute-btn").disabled = true;
-          document.getElementById("ag-code-view").textContent = generatedCode;
-        }
+            updateCodegenButtonState();
+            document.getElementById("ag-execute-btn").disabled = true;
+            document.getElementById("ag-code-view").textContent = generatedCode;
+          }
 
-        addPanelLog(
-          `Resuming pagination: Page ${state.current_page}/${state.max_pages} loaded.`,
-          "info",
-        );
+          addPanelLog(
+            `Resuming pagination: Page ${state.current_page}/${state.max_pages} loaded.`,
+            "info",
+          );
 
-        if (state.collected_html.length < state.current_page) {
-          state.collected_html.push(document.documentElement.outerHTML);
-          chrome.storage.local.set({ ag_pagination_state: state }, () => {
+          if (state.collected_html.length < state.current_page) {
+            state.collected_html.push(document.documentElement.outerHTML);
+            if (isContextValid() && chrome.storage && chrome.storage.local) {
+              try {
+                chrome.storage.local.set({ ag_pagination_state: state }, () => {
+                  setTimeout(() => {
+                    runPaginationLoop();
+                  }, state.delay);
+                });
+              } catch (e) {
+                addPanelLog("Failed to write resume state: context invalidated.", "error");
+              }
+            }
+          } else {
             setTimeout(() => {
               runPaginationLoop();
             }, state.delay);
-          });
-        } else {
-          setTimeout(() => {
-            runPaginationLoop();
-          }, state.delay);
+          }
         }
-      }
-    });
+      });
+    } catch (e) {
+      // Ignore initial resume failures
+    }
   }
 
   /**
@@ -963,22 +1106,56 @@
     styleEl.id = "antigravity-panel-styles";
     styleEl.textContent = `
       #antigravity-depth-panel {
+        /* Solarized Light (Neomorphic Cream & Teal) variables */
+        --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        --font-mono: 'Lora', 'Courier New', serif;
+        --color-bg: #f5f0e6;
+        --color-card-bg: #ebe5d8;
+        --color-border: rgba(15, 118, 110, 0.25);
+        --color-text-white: #0f172a;
+        --color-text-primary: #2d3748;
+        --color-text-muted: #718096;
+        --color-brand-violet: #0f766e;
+        --color-brand-emerald: #15803d;
+        --color-brand-rose: #be123c;
+        
+        --border-radius-main: 0px;
+        --border-radius-inner: 10px;
+        --border-radius-pill: 20px;
+        --border-style-main: none;
+        
+        --color-gradient-start: #0f766e;
+        --color-gradient-end: #0f766e;
+        --terminal-bg: #eee8d5;
+        
+        --ag-btn-primary-bg: #f5f0e6;
+        --ag-btn-primary-text: var(--color-brand-violet);
+        --ag-btn-primary-border: 1px solid rgba(15, 118, 110, 0.15);
+        --ag-btn-primary-shadow: 4px 4px 8px #e3dbcc, -4px -4px 8px #ffffff;
+        
+        --ag-btn-secondary-bg: #f5f0e6;
+        --ag-btn-secondary-text: var(--color-text-primary);
+        --ag-btn-secondary-border: 1px solid rgba(15, 118, 110, 0.15);
+        
+        --slider-thumb-radius: 50%;
+        --slider-thumb-bg: var(--color-brand-violet);
+        --slider-thumb-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+        --slider-thumb-border: 1px solid rgba(255, 255, 255, 0.4);
+        
         position: fixed;
         top: 0;
         right: -420px;
         width: 400px;
         height: 100vh;
-        background: rgba(8, 7, 17, 0.95);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border-left: 1px solid rgba(139, 92, 246, 0.3);
-        box-shadow: -10px 0 30px rgba(0, 0, 0, 0.8);
+        background: var(--color-bg);
+        border-left: 1px solid rgba(15, 118, 110, 0.15);
+        box-shadow: -8px 0 16px rgba(0,0,0,0.05);
         z-index: 9999999;
         display: flex;
         flex-direction: column;
-        color: #f8fafc;
-        font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        color: var(--color-text-white);
+        font-family: var(--font-sans);
+        transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1), background 0.3s ease, border 0.3s ease;
         box-sizing: border-box;
       }
       #antigravity-depth-panel.active {
@@ -986,10 +1163,11 @@
       }
       #antigravity-depth-panel * {
         box-sizing: border-box;
+        font-family: inherit;
       }
       .ag-panel-header {
         padding: 16px 20px;
-        border-bottom: 1px solid rgba(167, 139, 250, 0.15);
+        border-bottom: 1px solid var(--color-border);
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -1000,25 +1178,24 @@
         gap: 8px;
       }
       .ag-panel-title {
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 700;
         letter-spacing: 0.05em;
-        background: linear-gradient(to right, #c084fc, #f472b6);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+        background: transparent;
+        color: var(--color-brand-violet);
         margin: 0;
       }
       .ag-panel-close {
         background: none;
         border: none;
-        color: #94a3b8;
+        color: var(--color-text-muted);
         font-size: 20px;
         cursor: pointer;
         transition: color 0.2s;
         padding: 0 4px;
       }
       .ag-panel-close:hover {
-        color: #fb7185;
+        color: var(--color-brand-rose);
       }
       .ag-panel-body {
         padding: 20px;
@@ -1035,11 +1212,8 @@
         background: transparent;
       }
       .ag-scrollbar::-webkit-scrollbar-thumb {
-        background: rgba(167, 139, 250, 0.25);
+        background: var(--color-border);
         border-radius: 2px;
-      }
-      .ag-scrollbar::-webkit-scrollbar-thumb:hover {
-        background: rgba(167, 139, 250, 0.5);
       }
       .ag-panel-section {
         display: flex;
@@ -1047,18 +1221,19 @@
         gap: 6px;
       }
       .ag-section-label {
-        font-size: 10px;
-        color: #a78bfa;
-        font-family: monospace;
+        font-size: 9.5px;
+        color: var(--color-brand-violet);
+        font-family: var(--font-mono);
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.1em;
       }
       .ag-slider-container {
-        background: rgba(15, 14, 30, 0.6);
-        border: 1px solid rgba(167, 139, 250, 0.15);
-        border-radius: 8px;
+        background: #f5f0e6;
+        border: none;
+        border-radius: var(--border-radius-inner);
         padding: 12px 16px;
+        box-shadow: inset 3px 3px 6px #e3dbcc, inset -3px -3px 6px #ffffff;
       }
       .ag-slider-header {
         display: flex;
@@ -1067,22 +1242,22 @@
         margin-bottom: 8px;
       }
       .ag-slider-title {
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 600;
-        color: #cbd5e1;
+        color: var(--color-text-primary);
       }
       .ag-depth-value {
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 700;
-        color: #34d399;
-        font-family: monospace;
+        color: var(--color-brand-emerald);
+        font-family: var(--font-mono);
       }
       .ag-slider {
         -webkit-appearance: none;
         width: 100%;
         height: 6px;
         border-radius: 3px;
-        background: #0f172a;
+        background: #e5dec9;
         outline: none;
         margin: 8px 0;
       }
@@ -1091,98 +1266,122 @@
         appearance: none;
         width: 16px;
         height: 16px;
-        border-radius: 50%;
-        background: linear-gradient(135deg, #8b5cf6, #d946ef);
+        border-radius: var(--slider-thumb-radius, 50%);
+        background: var(--slider-thumb-bg);
         cursor: pointer;
-        box-shadow: 0 0 8px rgba(139, 92, 246, 0.6);
-        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow: var(--slider-thumb-shadow);
+        border: var(--slider-thumb-border);
       }
       .ag-tree-path {
-        font-family: monospace;
+        font-family: var(--font-mono);
         font-size: 10px;
-        background: #040309;
+        background: var(--terminal-bg);
+        border: none;
         padding: 8px 12px;
-        border-radius: 6px;
-        border: 1px solid rgba(255, 255, 255, 0.05);
+        border-radius: var(--border-radius-inner);
         overflow-x: auto;
         white-space: nowrap;
+        box-shadow: inset 2px 2px 5px #e3dbcc, inset -2px -2px 5px #ffffff;
       }
       .ag-tree-item {
-        color: #64748b;
+        color: var(--color-text-muted);
       }
       .ag-tree-arrow {
-        color: #475569;
+        color: var(--color-text-muted);
         margin: 0 4px;
       }
       .ag-tree-item.selected {
-        color: #34d399;
+        color: var(--color-brand-emerald);
         font-weight: 700;
       }
       .ag-terminal {
-        background: #020617;
-        border: 1px solid rgba(139, 92, 246, 0.25);
-        border-radius: 8px;
+        background: var(--terminal-bg) !important;
+        border: none !important;
+        border-radius: var(--border-radius-inner) !important;
         padding: 10px;
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 10px;
+        font-family: var(--font-mono) !important;
+        font-size: 10px !important;
         height: 140px;
         overflow-y: auto;
         display: flex;
         flex-direction: column;
         gap: 4px;
+        box-shadow: inset 3px 3px 6px #e3dbcc, inset -3px -3px 6px #ffffff !important;
+      }
+      .ag-terminal p {
+        margin: 0 !important;
+        line-height: 1.4 !important;
+        white-space: pre-wrap !important;
+        word-break: break-all !important;
+        background: transparent !important;
+        font-family: var(--font-mono) !important;
+      }
+      .ag-log-system {
+        color: var(--color-brand-violet) !important;
+      }
+      .ag-log-success {
+        color: var(--color-brand-emerald) !important;
+      }
+      .ag-log-error {
+        color: var(--color-brand-rose) !important;
+      }
+      .ag-log-info {
+        color: var(--color-text-primary) !important;
       }
       .ag-code-container {
         position: relative;
-        background: #020617;
-        border: 1px solid rgba(139, 92, 246, 0.25);
-        border-radius: 8px;
+        background: var(--terminal-bg) !important;
+        border: none !important;
+        border-radius: var(--border-radius-inner) !important;
         padding: 10px;
         height: 180px;
         overflow-y: auto;
+        box-shadow: inset 3px 3px 6px #e3dbcc, inset -3px -3px 6px #ffffff !important;
       }
       .ag-code-block {
-        font-family: 'JetBrains Mono', monospace;
-        font-size: 9.5px;
-        color: #e2e8f0;
-        white-space: pre;
-        margin: 0;
+        font-family: var(--font-mono) !important;
+        font-size: 9.5px !important;
+        color: var(--color-text-primary) !important;
+        white-space: pre !important;
+        margin: 0 !important;
+        background: transparent !important;
       }
       .ag-copy-btn {
         position: absolute;
         top: 6px;
         right: 6px;
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: #f5f0e6;
+        border: 1px solid rgba(15, 118, 110, 0.15);
         border-radius: 4px;
-        color: #cbd5e1;
+        color: var(--color-brand-violet);
         font-size: 9px;
         padding: 3px 6px;
         cursor: pointer;
         transition: all 0.2s;
+        box-shadow: 2px 2px 4px rgba(0,0,0,0.05);
       }
       .ag-copy-btn:hover {
-        background: rgba(139, 92, 246, 0.25);
-        border-color: rgba(139, 92, 246, 0.4);
+        box-shadow: 1px 1px 2px rgba(0,0,0,0.05);
       }
       .ag-records-container {
-        background: #020617;
-        border: 1px solid rgba(52, 211, 153, 0.25);
-        border-radius: 8px;
+        background: var(--terminal-bg) !important;
+        border: none !important;
+        border-radius: var(--border-radius-inner) !important;
         padding: 10px;
         height: 140px;
         overflow-y: auto;
+        box-shadow: inset 3px 3px 6px #e3dbcc, inset -3px -3px 6px #ffffff !important;
       }
       .ag-record-card {
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid rgba(255, 255, 255, 0.05);
-        border-radius: 4px;
-        padding: 6px 8px;
-        margin-bottom: 6px;
-        font-family: monospace;
-        font-size: 9.5px;
-      }
-      .ag-record-card:last-child {
-        margin-bottom: 0;
+        background: var(--color-card-bg) !important;
+        border: var(--border-style-main) !important;
+        border-radius: var(--border-radius-inner) !important;
+        padding: 6px 8px !important;
+        margin-bottom: 6px !important;
+        font-family: var(--font-mono) !important;
+        font-size: 9.5px !important;
+        color: var(--color-text-primary) !important;
+        box-shadow: 2px 2px 4px rgba(0,0,0,0.04);
       }
       .ag-btn-group {
         display: flex;
@@ -1191,9 +1390,9 @@
       .ag-btn {
         font-family: inherit;
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 700;
         padding: 8px 12px;
-        border-radius: 6px;
+        border-radius: var(--border-radius-inner);
         cursor: pointer;
         transition: all 0.15s ease;
         flex: 1;
@@ -1203,23 +1402,21 @@
         gap: 6px;
       }
       .ag-btn-primary {
-        color: white;
-        background: linear-gradient(to right, #7c3aed, #db2777);
-        border: none;
-        box-shadow: 0 4px 10px rgba(124, 58, 237, 0.25);
-      }
-      .ag-btn-primary:hover {
-        background: linear-gradient(to right, #8b5cf6, #ec4899);
-        box-shadow: 0 4px 14px rgba(139, 92, 246, 0.35);
+        color: var(--ag-btn-primary-text, white) !important;
+        background: var(--ag-btn-primary-bg) !important;
+        border: var(--ag-btn-primary-border) !important;
+        box-shadow: var(--ag-btn-primary-shadow) !important;
       }
       .ag-btn-secondary {
-        color: #cbd5e1;
-        background: rgba(30, 27, 75, 0.4);
-        border: 1px solid rgba(139, 92, 246, 0.25);
+        color: var(--ag-btn-secondary-text) !important;
+        background: var(--ag-btn-secondary-bg) !important;
+        border: var(--ag-btn-secondary-border) !important;
       }
-      .ag-btn-secondary:hover {
-        background: rgba(139, 92, 246, 0.15);
-        border-color: rgba(139, 92, 246, 0.45);
+      .ag-btn:hover {
+        box-shadow: 2px 2px 4px #e3dbcc, -2px -2px 4px #ffffff !important;
+      }
+      .ag-btn:active {
+        box-shadow: inset 3px 3px 6px #e3dbcc, inset -3px -3px 6px #ffffff !important;
       }
       .ag-btn:disabled {
         opacity: 0.4;
@@ -1228,8 +1425,8 @@
       .switch {
         position: relative;
         display: inline-block;
-        width: 34px;
-        height: 20px;
+        width: 38px;
+        height: 22px;
       }
       .switch input {
         opacity: 0;
@@ -1243,28 +1440,54 @@
         left: 0;
         right: 0;
         bottom: 0;
-        background-color: #0f172a;
-        border: 1px solid rgba(139, 92, 246, 0.3);
-        transition: .4s;
+        background-color: #fee2e2;
+        border: 1px solid rgba(190, 18, 60, 0.12);
+        transition: all .3s cubic-bezier(0.4, 0, 0.2, 1);
         border-radius: 20px;
+        box-shadow: inset 2px 2px 5px rgba(190, 18, 60, 0.08), 
+                    inset -2px -2px 5px #ffffff;
       }
       .slider:before {
         position: absolute;
         content: "";
-        height: 12px;
-        width: 12px;
+        height: 14px;
+        width: 14px;
         left: 3px;
         bottom: 3px;
-        background-color: white;
-        transition: .4s;
+        background-color: #be123c;
+        transition: all .3s cubic-bezier(0.4, 0, 0.2, 1);
         border-radius: 50%;
+        box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.15), 
+                    -1px -1px 3px rgba(255, 255, 255, 0.9);
       }
       .switch input:checked + .slider {
-        background-color: #8b5cf6 !important;
-        border-color: #d946ef !important;
+        background-color: #d1fae5 !important;
+        border-color: rgba(21, 128, 61, 0.2) !important;
+        box-shadow: inset 2px 2px 5px rgba(21, 128, 61, 0.08), 
+                    inset -2px -2px 5px #ffffff !important;
       }
       .switch input:checked + .slider:before {
-        transform: translateX(14px);
+        transform: translateX(18px) !important;
+        background-color: #15803d !important;
+      }
+      .ag-input {
+        background: var(--terminal-bg) !important;
+        border: 1px solid var(--color-border) !important;
+        border-radius: 4px !important;
+        color: var(--color-text-primary) !important;
+        font-size: 10px !important;
+        padding: 4px 6px !important;
+        font-family: var(--font-mono) !important;
+        box-shadow: inset 1px 1px 3px rgba(0, 0, 0, 0.08) !important;
+        outline: none !important;
+        transition: border-color 0.2s !important;
+      }
+      .ag-input:focus {
+        border-color: var(--color-brand-violet) !important;
+      }
+      .ag-input-label {
+        font-size: 9px !important;
+        color: var(--color-text-muted) !important;
       }
     `;
     document.head.appendChild(styleEl);
@@ -1310,7 +1533,7 @@
         </div>
 
         <!-- Pagination Settings -->
-        <div class="ag-panel-section" style="border-top: 1px solid rgba(167, 139, 250, 0.15); padding-top: 12px; margin-top: 4px;">
+        <div class="ag-panel-section" style="border-top: 1px solid var(--color-border); padding-top: 12px; margin-top: 4px;">
           <span class="ag-section-label">4. Pagination Settings</span>
           <div class="ag-slider-container" style="display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -1325,16 +1548,16 @@
                 <button id="ag-select-next-btn" class="ag-btn ag-btn-secondary" style="font-size: 10px; padding: 4px 8px; flex: 1; min-height: 24px; height: 28px;">
                   Select Next Button
                 </button>
-                <input type="text" id="ag-next-selector-input" placeholder="CSS Selector" style="background: #020617; border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 4px; color: #cbd5e1; font-size: 10px; padding: 4px 6px; flex: 2; font-family: monospace; height: 28px;">
+                <input type="text" id="ag-next-selector-input" placeholder="CSS Selector" class="ag-input" style="flex: 2; height: 28px;">
               </div>
               <div style="display: flex; gap: 12px;">
                 <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
-                  <span style="font-size: 9px; color: #94a3b8;">Max Pages</span>
-                  <input type="number" id="ag-max-pages" value="3" min="1" max="10" style="background: #020617; border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 4px; color: #cbd5e1; font-size: 10px; padding: 4px 6px; font-family: monospace; height: 24px;">
+                  <span class="ag-input-label">Max Pages</span>
+                  <input type="number" id="ag-max-pages" value="3" min="1" max="10" class="ag-input" style="height: 24px;">
                 </div>
                 <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
-                  <span style="font-size: 9px; color: #94a3b8;">Delay (ms)</span>
-                  <input type="number" id="ag-page-delay" value="1500" min="200" max="10000" style="background: #020617; border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 4px; color: #cbd5e1; font-size: 10px; padding: 4px 6px; font-family: monospace; height: 24px;">
+                  <span class="ag-input-label">Delay (ms)</span>
+                  <input type="number" id="ag-page-delay" value="1500" min="200" max="10000" class="ag-input" style="height: 24px;">
                 </div>
               </div>
             </div>
@@ -1345,7 +1568,7 @@
         <div class="ag-panel-section">
           <span class="ag-section-label">5. System Execution Logs</span>
           <div id="ag-terminal-logs" class="ag-terminal ag-scrollbar">
-            <p style="color: #a78bfa;">[system] Visual capture ready. Awaiting bounding box selection.</p>
+            <p class="ag-log-system">[system] Visual capture ready. Awaiting bounding box selection.</p>
           </div>
         </div>
 
@@ -1401,6 +1624,7 @@
         } else {
           controls.style.display = "none";
         }
+        updateCodegenButtonState();
       });
 
     document
@@ -1427,6 +1651,7 @@
       .getElementById("ag-next-selector-input")
       .addEventListener("input", (e) => {
         nextButtonSelector = e.target.value;
+        updateCodegenButtonState();
       });
 
     document
@@ -1443,6 +1668,7 @@
           });
         }
       });
+    updateCodegenButtonState();
   }
 
   // Check and resume any active pagination session
@@ -1464,6 +1690,21 @@
       overlay.style.display = "none";
       currentTarget = null;
       closePanel();
+      sendResponse({ status: "ok" });
+    } else if (message.action === "loadSavedParser") {
+      injectPanel();
+      const panel = document.getElementById("antigravity-depth-panel");
+      if (panel) {
+        panel.classList.add("active");
+      }
+      generatedCode = message.code;
+      inferredSelectors = message.selectors;
+      
+      document.getElementById("ag-code-view").textContent = generatedCode;
+      document.getElementById("ag-execute-btn").disabled = false;
+      
+      addPanelLog("Loaded saved parser from history!", "success");
+      updateCodegenButtonState();
       sendResponse({ status: "ok" });
     }
     return true; // Keep message channel open for async response

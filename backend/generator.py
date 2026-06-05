@@ -22,12 +22,17 @@ class ExtractedCatalogItem(BaseModel):
     price: float = Field(description="Normalized numerical price value")
     source_url: str = Field(description="Fully qualified destination link")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary layout key-values discovered")
+
+class AgenticCatalogSDK:
+    def bulk_upsert(self, collection_name: str, data: List[Dict[str, Any]], unique_key: str) -> bool:
+        \"\"\"Executes a high-performance database sync payload via the system wrapper.\"\"\"
+        pass
 ```
 
 Your response should contain:
 1. Inferred CSS selectors as a JSON block.
 2. A complete, runnable Python code block that:
-   - Imports ExtractedCatalogItem and AgenticCatalogSDK.
+   - Imports ExtractedCatalogItem and AgenticCatalogSDK from sdk_blueprint.
    - Defines the exact extraction function: `def extract_items(html_content: str) -> List[Dict[str, Any]]:` which parses the HTML document and returns a list of dictionaries conforming to ExtractedCatalogItem model properties.
    - Calls bulk_upsert.
    - Ensures all Python type annotations are native and in lowercase (specifically use `str` instead of `String` or `string`, `float` instead of `Double` or `number`, and `bool` instead of `Boolean`).

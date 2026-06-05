@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Antigravity Scrape-as-Code Engine</title>
-  <!-- Google Fonts Outfit & JetBrains Mono -->
+  <!-- Google Fonts Outfit, Lora & JetBrains Mono -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Lora:ital,wght@0,400;0,700;1,400&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
   <!-- Stylesheet -->
   <link rel="stylesheet" href="popup.css">
 </head>
@@ -30,37 +30,61 @@
 
   <!-- Main Card -->
   <main class="main-card">
-    <!-- Extension status -->
-    <div>
-      <span class="section-title">Workspace Engine</span>
-      <div class="locator-control">
-        <span class="locator-label">Visual Element Locator</span>
-        <label class="switch">
-          <input type="checkbox" id="toggle-hover">
-          <span class="slider"></span>
-        </label>
+    <!-- Tabs Navigation -->
+    <div class="tabs-container">
+      <button class="tab-btn active" id="tab-locator" data-target="locator-content">
+        Locator
+      </button>
+      <button class="tab-btn" id="tab-history" data-target="history-content">
+        History
+      </button>
+    </div>
+
+    <!-- Locator Content View -->
+    <div id="locator-content" class="tab-content active">
+      <!-- Extension status -->
+      <div style="margin-bottom: 12px;">
+        <span class="section-title">Workspace Engine</span>
+        <div class="locator-control">
+          <span class="locator-label">Visual Element Locator</span>
+          <label class="switch">
+            <input type="checkbox" id="toggle-hover">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Instruction Info -->
+      <div class="instructions-box" style="margin-bottom: 12px;">
+        <div class="instructions-title-container">
+          <span class="text-brand-violet">💡</span>
+          <span class="instructions-title">How to use:</span>
+        </div>
+        <ol class="instructions-list">
+          <li>Hover your cursor over any item or section on the web page.</li>
+          <li>Observe the neon indicator bounding boxes tracking target elements.</li>
+          <li>Click a listing item to capture its visual node context.</li>
+        </ol>
+      </div>
+
+      <!-- Integration Terminal Section -->
+      <div class="terminal-section">
+        <span class="section-title">5. System Execution Logs</span>
+        <div class="terminal custom-scrollbar">
+          <div class="console-logs" id="console-logs">
+            <p class="text-brand-violet">[system] Initializing Scrape-as-Code control plane...</p>
+            <p class="text-brand-emerald">[success] Chrome extension boilerplate active</p>
+            <p class="text-slate-400">[log] Awaiting user hover/click interaction...</p>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Instruction Info -->
-    <div class="instructions-box">
-      <div class="instructions-title-container">
-        <span class="text-brand-violet">💡</span>
-        <span class="instructions-title">How to use:</span>
-      </div>
-      <ol class="instructions-list">
-        <li>Hover your cursor over any item or section on the web page.</li>
-        <li>Observe the neon indicator bounding boxes tracking target elements.</li>
-        <li>Click a listing item to capture its visual node context.</li>
-      </ol>
-    </div>
-
-    <!-- Integration Terminal -->
-    <div class="terminal custom-scrollbar">
-      <div class="console-logs" id="console-logs">
-        <p class="text-brand-violet">[system] Initializing Scrape-as-Code control plane...</p>
-        <p class="text-brand-emerald">[success] Chrome extension boilerplate active</p>
-        <p class="text-slate-400">[log] Awaiting user hover/click interaction...</p>
+    <!-- Saved History View -->
+    <div id="history-content" class="tab-content" style="display: none;">
+      <span class="section-title">Saved Parsers</span>
+      <div class="history-list custom-scrollbar" id="history-list">
+        <p class="no-history-text">No saved parser scripts yet. Generate one to auto-save!</p>
       </div>
     </div>
   </main>
