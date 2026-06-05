@@ -96,7 +96,11 @@ def execute_parser(request: ExecutionRequest):
                 )
 
             # Run extraction
-            extracted_items = extract_items_func(request.full_html)
+            html_inputs = request.full_htmls if request.full_htmls is not None else [request.full_html or ""]
+            extracted_items = []
+            for _idx, html_content in enumerate(html_inputs):
+                page_items = extract_items_func(html_content)
+                extracted_items.extend(page_items)
 
             # Invoke AgenticCatalogSDK to run bulk_upsert internally if desired
             sdk_class = local_namespace.get("AgenticCatalogSDK")

@@ -20,6 +20,8 @@
   let selectedParent = null;
   let generatedCode = "";
   let inferredSelectors = null;
+  let nextButtonSelector = "";
+  let isSelectingNextButton = false;
 
   // Create hover highlight overlay container
   const overlay = document.createElement("div");
@@ -157,27 +159,48 @@
     const top = rect.top + scrollTop;
     const left = rect.left + scrollLeft;
 
-    Object.assign(overlay.style, {
-      display: "block",
-      top: `${top}px`,
-      left: `${left}px`,
-      width: `${width}px`,
-      height: `${height}px`
-    });
-
-    let label = target.tagName.toLowerCase();
-    if (target.id) {
-      label += `#${target.id}`;
-    }
-    if (target.className && typeof target.className === "string") {
-      const classes = target.className.split(/\s+/).filter(c => c && !c.startsWith("antigravity")).slice(0, 2);
-      if (classes.length > 0) {
-        label += `.${classes.join(".")}`;
+    if (isSelectingNextButton) {
+      Object.assign(overlay.style, {
+        display: "block",
+        top: `${top}px`,
+        left: `${left}px`,
+        width: `${width}px`,
+        height: `${height}px`,
+        border: "2px solid rgba(236, 72, 153, 0.8)", // Pink neon
+        backgroundColor: "rgba(236, 72, 153, 0.08)",
+        boxShadow: "0 0 12px rgba(236, 72, 153, 0.4), inset 0 0 4px rgba(236, 72, 153, 0.2)"
+      });
+      badge.textContent = `[Next Page Trigger] ${target.tagName.toLowerCase()}`;
+      badge.style.border = "1px solid rgba(236, 72, 153, 0.5)";
+      badge.style.color = "#f472b6";
+      badge.style.backgroundColor = "#500724";
+    } else {
+      Object.assign(overlay.style, {
+        display: "block",
+        top: `${top}px`,
+        left: `${left}px`,
+        width: `${width}px`,
+        height: `${height}px`,
+        border: "2px solid rgba(139, 92, 246, 0.8)", // Violet neon
+        backgroundColor: "rgba(139, 92, 246, 0.08)",
+        boxShadow: "0 0 12px rgba(139, 92, 246, 0.4), inset 0 0 4px rgba(139, 92, 246, 0.2)"
+      });
+      let label = target.tagName.toLowerCase();
+      if (target.id) {
+        label += `#${target.id}`;
       }
+      if (target.className && typeof target.className === "string") {
+        const classes = target.className.split(/\s+/).filter(c => c && !c.startsWith("antigravity")).slice(0, 2);
+        if (classes.length > 0) {
+          label += `.${classes.join(".")}`;
+        }
+      }
+      label += ` [${Math.round(width)}x${Math.round(height)}]`;
+      badge.textContent = label;
+      badge.style.border = "1px solid rgba(139, 92, 246, 0.5)";
+      badge.style.color = "#a78bfa";
+      badge.style.backgroundColor = "#1e1b4b";
     }
-    
-    label += ` [${Math.round(width)}x${Math.round(height)}]`;
-    badge.textContent = label;
 
     if (rect.top < 28) {
       badge.style.top = "2px";
@@ -251,6 +274,25 @@
     // Prevent normal link navigation/button clicks
     e.preventDefault();
     e.stopPropagation();
+
+    if (isSelectingNextButton) {
+      nextButtonSelector = generateCssSelector(e.target);
+      const input = document.getElementById("ag-next-selector-input");
+      if (input) {
+        input.value = nextButtonSelector;
+      }
+      isSelectingNextButton = false;
+      addPanelLog(`Selected Next Page Button selector: ${nextButtonSelector}`, "success");
+      
+      const selectBtn = document.getElementById("ag-select-next-btn");
+      if (selectBtn) {
+        selectBtn.textContent = "Select Next Button";
+        selectBtn.classList.remove("ag-btn-primary");
+        selectBtn.classList.add("ag-btn-secondary");
+      }
+      overlay.style.display = "none";
+      return;
+    }
 
     console.log("🎯 Selected element for scoping:", e.target);
     
@@ -396,6 +438,37 @@
   }
 
   /**
+   * Generates a unique CSS selector for a given element
+   */
+  function generateCssSelector(el) {
+    if (el.id) {
+      return `#${el.id}`;
+    }
+    let parts = [];
+    let cur = el;
+    while (cur && cur.tagName !== "BODY" && cur.tagName !== "HTML") {
+      let part = cur.tagName.toLowerCase();
+      if (cur.id) {
+        part += `#${cur.id}`;
+        parts.unshift(part);
+        break;
+      }
+      if (cur.className && typeof cur.className === "string") {
+        const classes = cur.className.split(/\s+/).filter(c => c && !c.startsWith("antigravity") && !c.startsWith("selected") && c.trim() !== "");
+        if (classes.length > 0) {
+          part += `.${classes.join(".")}`;
+        }
+      }
+      parts.unshift(part);
+      cur = cur.parentElement;
+    }
+    if (parts.length === 0) {
+      return el.tagName.toLowerCase();
+    }
+    return parts.join(" > ");
+  }
+
+  /**
    * Cleans HTML container snippet to avoid payload bloating (removes SVG, scripts, canvas, base64 images)
    */
   function cleanHtmlSnippet(element) {
@@ -478,9 +551,43 @@
   /**
    * Runs the dry run parser execution against the full document HTML in the sandbox
    */
+  /**
+   * Runs the dry run parser execution against the full document HTML in the sandbox
+   */
   function runParserExecution() {
     if (!generatedCode) return;
     
+    // Check if auto-pagination is toggled
+    const isPaginateEnabled = document.getElementById("ag-paginate-toggle")?.checked;
+    if (isPaginateEnabled) {
+      if (!nextButtonSelector) {
+        addPanelLog("Please select a Next Page Button selector first.", "error");
+        return;
+      }
+      
+      const maxPages = parseInt(document.getElementById("ag-max-pages").value, 10) || 3;
+      const delay = parseInt(document.getElementById("ag-page-delay").value, 10) || 1500;
+      
+      addPanelLog(`Initializing pagination dry-run. Target: ${maxPages} pages.`, "info");
+      
+      const paginationState = {
+        active: true,
+        next_selector: nextButtonSelector,
+        max_pages: maxPages,
+        current_page: 1,
+        collected_html: [document.documentElement.outerHTML],
+        generated_code: generatedCode,
+        collection_name: "visual_extract_items",
+        unique_key: "title",
+        delay: delay
+      };
+      
+      chrome.storage.local.set({ ag_pagination_state: paginationState }, () => {
+        runPaginationLoop();
+      });
+      return;
+    }
+
     addPanelLog("Capturing full document HTML for dry run...", "info");
     const fullHtml = document.documentElement.outerHTML;
     
@@ -538,6 +645,176 @@
     .catch(err => {
       document.getElementById("ag-execute-btn").disabled = false;
       addPanelLog(`Execution request failed: ${err.message}`, "error");
+    });
+  }
+
+  /**
+   * Orchestrates the pagination loop step by step
+   */
+  function runPaginationLoop() {
+    if (!chrome.storage || !chrome.storage.local) return;
+    
+    chrome.storage.local.get(["ag_pagination_state"], (result) => {
+      const state = result.ag_pagination_state;
+      if (!state || !state.active) return;
+      
+      if (state.current_page >= state.max_pages) {
+        addPanelLog("All requested pages captured. Submitting to backend parser...", "success");
+        finishPagination(state);
+        return;
+      }
+      
+      const nextBtn = document.querySelector(state.next_selector);
+      if (!nextBtn) {
+        addPanelLog(`Next page button not found using selector: '${state.next_selector}'. Completing extraction early with ${state.collected_html.length} pages.`, "error");
+        finishPagination(state);
+        return;
+      }
+      
+      addPanelLog(`Page ${state.current_page}/${state.max_pages} processed. Triggering navigation to next page...`, "info");
+      
+      state.current_page += 1;
+      chrome.storage.local.set({ ag_pagination_state: state }, () => {
+        nextBtn.click();
+        
+        setTimeout(() => {
+          chrome.storage.local.get(["ag_pagination_state"], (res) => {
+            const current_state = res.ag_pagination_state;
+            if (current_state && current_state.active && current_state.current_page === state.current_page) {
+              addPanelLog(`SPA/AJAX update detected. Capturing Page ${current_state.current_page}...`, "info");
+              current_state.collected_html.push(document.documentElement.outerHTML);
+              chrome.storage.local.set({ ag_pagination_state: current_state }, () => {
+                runPaginationLoop();
+              });
+            }
+          });
+        }, state.delay);
+      });
+    });
+  }
+
+  /**
+   * Finishes pagination and submits the HTML collection
+   */
+  function finishPagination(state) {
+    submitAggregatedHtmls(state.collected_html, state.generated_code, state.collection_name, state.unique_key);
+    chrome.storage.local.remove(["ag_pagination_state"]);
+    
+    const codegenBtn = document.getElementById("ag-codegen-btn");
+    const executeBtn = document.getElementById("ag-execute-btn");
+    if (codegenBtn) codegenBtn.disabled = false;
+    if (executeBtn) executeBtn.disabled = false;
+  }
+
+  /**
+   * Sends the collected page HTML array to the backend for unified parsing
+   */
+  function submitAggregatedHtmls(htmls, code, collectionName, uniqueKey) {
+    addPanelLog(`Submitting ${htmls.length} aggregated pages for parser execution...`, "info");
+    
+    const executeBtn = document.getElementById("ag-execute-btn");
+    if (executeBtn) executeBtn.disabled = true;
+    
+    fetch("http://127.0.0.1:8000/api/execute-parser", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        generated_code: code,
+        full_htmls: htmls,
+        collection_name: collectionName,
+        unique_key: uniqueKey
+      })
+    })
+    .then(res => {
+      if (!res.ok) {
+        throw new Error(`HTTP error ${res.status}`);
+      }
+      return res.json();
+    })
+    .then(data => {
+      if (executeBtn) executeBtn.disabled = false;
+      
+      if (data.success) {
+        addPanelLog(`Parsed ${data.items_count} items across ${htmls.length} pages successfully! Check results below.`, "success");
+        if (data.logs) {
+          addPanelLog(`Backend logs:\n${data.logs}`);
+        }
+        
+        const recordsView = document.getElementById("ag-records-view");
+        if (recordsView) {
+          recordsView.innerHTML = "";
+          if (data.parsed_items && data.parsed_items.length > 0) {
+            data.parsed_items.forEach((item, idx) => {
+              const card = document.createElement("div");
+              card.className = "ag-record-card";
+              card.innerHTML = `
+                <div style="font-weight: 700; color: #f8fafc; margin-bottom: 2px;">[${idx + 1}] ${item.title || "No Title"}</div>
+                <div style="color: #34d399; margin-bottom: 4px;">Price: $${item.price !== undefined ? item.price : "N/A"}</div>
+                <div style="color: #64748b; word-break: break-all;">Link: <a href="${item.source_url || '#'}" target="_blank" style="color: #a78bfa; text-decoration: none;">${item.source_url || "N/A"}</a></div>
+              `;
+              recordsView.appendChild(card);
+            });
+          } else {
+            recordsView.innerHTML = `<p style="color: #64748b; font-size: 10px; margin: 0; font-style: italic;">Zero items returned by parser.</p>`;
+          }
+        }
+      } else {
+        addPanelLog(`Execution failed: ${data.logs}`, "error");
+      }
+    })
+    .catch(err => {
+      if (executeBtn) executeBtn.disabled = false;
+      addPanelLog(`Aggregated execution request failed: ${err.message}`, "error");
+    });
+  }
+
+  /**
+   * Resumes a stored active pagination session after page navigation
+   */
+  function checkAndResumePagination() {
+    if (!chrome.storage || !chrome.storage.local) return;
+    chrome.storage.local.get(["ag_pagination_state"], (result) => {
+      const state = result.ag_pagination_state;
+      if (state && state.active) {
+        console.log("🔄 Antigravity: Resuming pagination session from storage...", state);
+        
+        generatedCode = state.generated_code;
+        nextButtonSelector = state.next_selector;
+        
+        injectPanel();
+        
+        const panel = document.getElementById("antigravity-depth-panel");
+        if (panel) {
+          panel.classList.add("active");
+          
+          document.getElementById("ag-paginate-toggle").checked = true;
+          document.getElementById("ag-pagination-controls").style.display = "flex";
+          document.getElementById("ag-next-selector-input").value = nextButtonSelector;
+          document.getElementById("ag-max-pages").value = state.max_pages;
+          document.getElementById("ag-page-delay").value = state.delay;
+          
+          document.getElementById("ag-codegen-btn").disabled = true;
+          document.getElementById("ag-execute-btn").disabled = true;
+          document.getElementById("ag-code-view").textContent = generatedCode;
+        }
+
+        addPanelLog(`Resuming pagination: Page ${state.current_page}/${state.max_pages} loaded.`, "info");
+
+        if (state.collected_html.length < state.current_page) {
+          state.collected_html.push(document.documentElement.outerHTML);
+          chrome.storage.local.set({ ag_pagination_state: state }, () => {
+            setTimeout(() => {
+              runPaginationLoop();
+            }, state.delay);
+          });
+        } else {
+          setTimeout(() => {
+            runPaginationLoop();
+          }, state.delay);
+        }
+      }
     });
   }
 
@@ -814,6 +1091,47 @@
         opacity: 0.4;
         cursor: not-allowed;
       }
+      .switch {
+        position: relative;
+        display: inline-block;
+        width: 34px;
+        height: 20px;
+      }
+      .switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: #0f172a;
+        border: 1px solid rgba(139, 92, 246, 0.3);
+        transition: .4s;
+        border-radius: 20px;
+      }
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 12px;
+        width: 12px;
+        left: 3px;
+        bottom: 3px;
+        background-color: white;
+        transition: .4s;
+        border-radius: 50%;
+      }
+      .switch input:checked + .slider {
+        background-color: #8b5cf6 !important;
+        border-color: #d946ef !important;
+      }
+      .switch input:checked + .slider:before {
+        transform: translateX(14px);
+      }
     `;
     document.head.appendChild(styleEl);
 
@@ -857,9 +1175,41 @@
           </div>
         </div>
 
+        <!-- Pagination Settings -->
+        <div class="ag-panel-section" style="border-top: 1px solid rgba(167, 139, 250, 0.15); padding-top: 12px; margin-top: 4px;">
+          <span class="ag-section-label">4. Pagination Settings</span>
+          <div class="ag-slider-container" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="ag-slider-title">Enable Auto-Pagination</span>
+              <label class="switch">
+                <input type="checkbox" id="ag-paginate-toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div id="ag-pagination-controls" style="display: none; flex-direction: column; gap: 8px; margin-top: 4px;">
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <button id="ag-select-next-btn" class="ag-btn ag-btn-secondary" style="font-size: 10px; padding: 4px 8px; flex: 1; min-height: 24px; height: 28px;">
+                  Select Next Button
+                </button>
+                <input type="text" id="ag-next-selector-input" placeholder="CSS Selector" style="background: #020617; border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 4px; color: #cbd5e1; font-size: 10px; padding: 4px 6px; flex: 2; font-family: monospace; height: 28px;">
+              </div>
+              <div style="display: flex; gap: 12px;">
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
+                  <span style="font-size: 9px; color: #94a3b8;">Max Pages</span>
+                  <input type="number" id="ag-max-pages" value="3" min="1" max="10" style="background: #020617; border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 4px; color: #cbd5e1; font-size: 10px; padding: 4px 6px; font-family: monospace; height: 24px;">
+                </div>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
+                  <span style="font-size: 9px; color: #94a3b8;">Delay (ms)</span>
+                  <input type="number" id="ag-page-delay" value="1500" min="200" max="10000" style="background: #020617; border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 4px; color: #cbd5e1; font-size: 10px; padding: 4px 6px; font-family: monospace; height: 24px;">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Terminal Logs -->
         <div class="ag-panel-section">
-          <span class="ag-section-label">4. System Execution Logs</span>
+          <span class="ag-section-label">5. System Execution Logs</span>
           <div id="ag-terminal-logs" class="ag-terminal ag-scrollbar">
             <p style="color: #a78bfa;">[system] Visual capture ready. Awaiting bounding box selection.</p>
           </div>
@@ -867,7 +1217,7 @@
 
         <!-- Generated Code Viewport -->
         <div class="ag-panel-section">
-          <span class="ag-section-label">5. Generated Parser Code</span>
+          <span class="ag-section-label">6. Generated Parser Code</span>
           <div class="ag-code-container ag-scrollbar">
             <button id="ag-copy-code-btn" class="ag-copy-btn">Copy</button>
             <pre id="ag-code-view" class="ag-code-block"># Standby. Awaiting code generation...</pre>
@@ -876,7 +1226,7 @@
 
         <!-- Extracted Records -->
         <div class="ag-panel-section">
-          <span class="ag-section-label">6. Extracted Catalog Items</span>
+          <span class="ag-section-label">7. Extracted Catalog Items</span>
           <div id="ag-records-view" class="ag-records-container ag-scrollbar">
             <p style="color: #64748b; font-size: 10px; margin: 0; font-style: italic;">No records extracted yet.</p>
           </div>
@@ -905,6 +1255,35 @@
       runParserExecution();
     });
 
+    // Pagination Listeners
+    document.getElementById("ag-paginate-toggle").addEventListener("change", (e) => {
+      const controls = document.getElementById("ag-pagination-controls");
+      if (e.target.checked) {
+        controls.style.display = "flex";
+      } else {
+        controls.style.display = "none";
+      }
+    });
+
+    document.getElementById("ag-select-next-btn").addEventListener("click", () => {
+      isSelectingNextButton = !isSelectingNextButton;
+      const selectBtn = document.getElementById("ag-select-next-btn");
+      if (isSelectingNextButton) {
+        selectBtn.textContent = "Click Next Button on Page...";
+        selectBtn.classList.remove("ag-btn-secondary");
+        selectBtn.classList.add("ag-btn-primary");
+        addPanelLog("Hover and click the 'Next' page button on the website.", "info");
+      } else {
+        selectBtn.textContent = "Select Next Button";
+        selectBtn.classList.remove("ag-btn-primary");
+        selectBtn.classList.add("ag-btn-secondary");
+      }
+    });
+
+    document.getElementById("ag-next-selector-input").addEventListener("input", (e) => {
+      nextButtonSelector = e.target.value;
+    });
+
     document.getElementById("ag-copy-code-btn").addEventListener("click", () => {
       if (generatedCode) {
         navigator.clipboard.writeText(generatedCode).then(() => {
@@ -916,6 +1295,9 @@
       }
     });
   }
+
+  // Check and resume any active pagination session
+  checkAndResumePagination();
 
   // Message listener from popup controls
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

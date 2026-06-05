@@ -27,8 +27,11 @@ class SnippetGenerationResponse(BaseModel):
 
 class ExecutionRequest(BaseModel):
     generated_code: str = Field(description="The Python code block to execute")
-    full_html: str = Field(
-        description="The full page HTML document to run the parser against"
+    full_html: Optional[str] = Field(
+        default=None, description="The full page HTML document to run the parser against"
+    )
+    full_htmls: Optional[List[str]] = Field(
+        default=None, description="A list of full page HTML documents to run the parser against"
     )
     collection_name: Optional[str] = Field(
         default="catalog_items", description="Target database collection name"
