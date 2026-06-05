@@ -26,8 +26,23 @@ class ExtractedCatalogItem(BaseModel):
 
 Your response should contain:
 1. Inferred CSS selectors as a JSON block.
-2. A complete, runnable Python code block that imports ExtractedCatalogItem and AgenticCatalogSDK, defines an extraction function, and calls bulk_upsert.
+2. A complete, runnable Python code block that:
+   - Imports ExtractedCatalogItem and AgenticCatalogSDK.
+   - Defines the exact extraction function: `def extract_items(html_content: str) -> List[Dict[str, Any]]:` which parses the HTML document and returns a list of dictionaries conforming to ExtractedCatalogItem model properties.
+   - Calls bulk_upsert.
+   - Ensures all Python type annotations are native and in lowercase (specifically use `str` instead of `String` or `string`, `float` instead of `Double` or `number`, and `bool` instead of `Boolean`).
 """
+
+
+def _clean_python_code(code: str) -> str:
+    # Correct common LLM type-hint typos in generated Python code (e.g. ": String" -> ": str")
+    code = re.sub(r'(:\s*)String\b', r'\1str', code)
+    code = re.sub(r'\[\s*String\s*\]', r'[str]', code)
+    code = re.sub(r'(:\s*)Double\b', r'\1float', code)
+    code = re.sub(r'\[\s*Double\s*\]', r'[float]', code)
+    code = re.sub(r'(:\s*)Boolean\b', r'\1bool', code)
+    code = re.sub(r'\[\s*Boolean\s*\]', r'[bool]', code)
+    return code
 
 
 def generate_parser_code(
@@ -41,11 +56,16 @@ def generate_parser_code(
     openai_key = os.environ.get("OPENAI_API_KEY")
 
     if gemini_key:
-        return _generate_with_gemini(gemini_key, html_snippet, context_url)
+        success, code, selectors, message = _generate_with_gemini(gemini_key, html_snippet, context_url)
     elif openai_key:
-        return _generate_with_openai(openai_key, html_snippet, context_url)
+        success, code, selectors, message = _generate_with_openai(openai_key, html_snippet, context_url)
     else:
-        return _generate_with_heuristics(html_snippet, context_url)
+        success, code, selectors, message = _generate_with_heuristics(html_snippet, context_url)
+
+    if success and code:
+        code = _clean_python_code(code)
+
+    return success, code, selectors, message
 
 
 def _generate_with_gemini(
@@ -53,7 +73,7 @@ def _generate_with_gemini(
 ) -> Tuple[bool, str, Dict[str, str], str]:
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3.5-flash")
 
         prompt = f"""
         {SYSTEM_INSTRUCTIONS}
@@ -276,10 +296,18 @@ if __name__ == "__main__":
 
 
 def _extract_code_block(text: str, language: str) -> str:
-    pattern = rf"```(?:{language})?\n(.*?)\n```"
+    # 1. First try to find a block explicitly labeled with the language name (e.g., ```python)
+    pattern = rf"```(?:{language})\s*\n(.*?)\s*```"
     match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip()
+    
+    # 2. If not found, try to find any unlabeled block (e.g., ``` without language)
+    pattern_unlabeled = r"```\s*\n(.*?)\s*```"
+    match_unlabeled = re.search(pattern_unlabeled, text, re.DOTALL | re.IGNORECASE)
+    if match_unlabeled:
+        return match_unlabeled.group(1).strip()
+        
     return text.strip()
 
 
