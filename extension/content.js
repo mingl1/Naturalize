@@ -12,7 +12,7 @@
 
   console.log("🚀 Antigravity Scrape-as-Code Content Script Active.");
 
-  let hoverEnabled = true;
+  let hoverEnabled = false;
   let currentTarget = null;
 
   let clickedElement = null;
@@ -26,7 +26,7 @@
   // Create hover highlight overlay container
   const overlay = document.createElement("div");
   overlay.id = "antigravity-hover-overlay";
-  
+
   // Set overlay styling (glassmorphism style with violet neon border)
   Object.assign(overlay.style, {
     position: "absolute",
@@ -35,10 +35,12 @@
     border: "2px solid rgba(139, 92, 246, 0.8)", // Violet neon
     borderRadius: "4px",
     backgroundColor: "rgba(139, 92, 246, 0.08)",
-    boxShadow: "0 0 12px rgba(139, 92, 246, 0.4), inset 0 0 4px rgba(139, 92, 246, 0.2)",
-    transition: "top 0.1s ease-out, left 0.1s ease-out, width 0.1s ease-out, height 0.1s ease-out",
+    boxShadow:
+      "0 0 12px rgba(139, 92, 246, 0.4), inset 0 0 4px rgba(139, 92, 246, 0.2)",
+    transition:
+      "top 0.1s ease-out, left 0.1s ease-out, width 0.1s ease-out, height 0.1s ease-out",
     display: "none",
-    boxSizing: "border-box"
+    boxSizing: "border-box",
   });
 
   // Create floating info badge
@@ -57,7 +59,7 @@
     border: "1px solid rgba(139, 92, 246, 0.5)",
     whiteSpace: "nowrap",
     pointerEvents: "none",
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.3)"
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.3)",
   });
 
   overlay.appendChild(badge);
@@ -73,10 +75,12 @@
     border: "2px dashed rgba(52, 211, 153, 0.9)", // Emerald neon dashed border
     borderRadius: "4px",
     backgroundColor: "rgba(52, 211, 153, 0.05)",
-    boxShadow: "0 0 16px rgba(52, 211, 153, 0.3), inset 0 0 6px rgba(52, 211, 153, 0.15)",
-    transition: "top 0.15s ease-out, left 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out",
+    boxShadow:
+      "0 0 16px rgba(52, 211, 153, 0.3), inset 0 0 6px rgba(52, 211, 153, 0.15)",
+    transition:
+      "top 0.15s ease-out, left 0.15s ease-out, width 0.15s ease-out, height 0.15s ease-out",
     display: "none",
-    boxSizing: "border-box"
+    boxSizing: "border-box",
   });
 
   const parentBadge = document.createElement("div");
@@ -94,52 +98,58 @@
     border: "1px solid rgba(52, 211, 153, 0.5)",
     whiteSpace: "nowrap",
     pointerEvents: "none",
-    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.3)"
+    boxShadow: "0 2px 4px rgba(0, 0, 0, 0.3)",
   });
   parentOverlay.appendChild(parentBadge);
   document.body.appendChild(parentOverlay);
 
-  // Initialize state from storage
-  if (chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(["hoverEnabled"], (result) => {
-      if (result.hasOwnProperty("hoverEnabled")) {
-        hoverEnabled = result.hoverEnabled;
-      }
-    });
-  }
-
   // Track hover movements
-  document.addEventListener("mouseover", (e) => {
-    if (!hoverEnabled) return;
-    
-    const target = e.target;
+  document.addEventListener(
+    "mouseover",
+    (e) => {
+      if (!hoverEnabled) return;
 
-    // Do not highlight the overlays, badge, or panel itself
-    if (
-      target === overlay || overlay.contains(target) || 
-      target === parentOverlay || parentOverlay.contains(target) ||
-      target === document.body || target === document.documentElement ||
-      document.getElementById("antigravity-depth-panel")?.contains(target)
-    ) {
-      return;
-    }
+      const target = e.target;
 
-    currentTarget = target;
-    updateOverlay(target);
-  }, true);
+      // Do not highlight the overlays, badge, or panel itself
+      if (
+        target === overlay ||
+        overlay.contains(target) ||
+        target === parentOverlay ||
+        parentOverlay.contains(target) ||
+        target === document.body ||
+        target === document.documentElement ||
+        document.getElementById("antigravity-depth-panel")?.contains(target)
+      ) {
+        return;
+      }
 
-  document.addEventListener("mouseout", (e) => {
-    if (e.target === currentTarget) {
-      overlay.style.display = "none";
-      currentTarget = null;
-    }
-  }, true);
+      currentTarget = target;
+      updateOverlay(target);
+    },
+    true,
+  );
+
+  document.addEventListener(
+    "mouseout",
+    (e) => {
+      if (e.target === currentTarget) {
+        overlay.style.display = "none";
+        currentTarget = null;
+      }
+    },
+    true,
+  );
 
   // Keep overlays in sync with scrolling/resizing
-  window.addEventListener("scroll", () => {
-    if (hoverEnabled && currentTarget) updateOverlay(currentTarget);
-    if (selectedParent) updateParentOverlay(selectedParent);
-  }, true);
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (hoverEnabled && currentTarget) updateOverlay(currentTarget);
+      if (selectedParent) updateParentOverlay(selectedParent);
+    },
+    true,
+  );
 
   window.addEventListener("resize", () => {
     if (hoverEnabled && currentTarget) updateOverlay(currentTarget);
@@ -168,7 +178,8 @@
         height: `${height}px`,
         border: "2px solid rgba(236, 72, 153, 0.8)", // Pink neon
         backgroundColor: "rgba(236, 72, 153, 0.08)",
-        boxShadow: "0 0 12px rgba(236, 72, 153, 0.4), inset 0 0 4px rgba(236, 72, 153, 0.2)"
+        boxShadow:
+          "0 0 12px rgba(236, 72, 153, 0.4), inset 0 0 4px rgba(236, 72, 153, 0.2)",
       });
       badge.textContent = `[Next Page Trigger] ${target.tagName.toLowerCase()}`;
       badge.style.border = "1px solid rgba(236, 72, 153, 0.5)";
@@ -183,14 +194,18 @@
         height: `${height}px`,
         border: "2px solid rgba(139, 92, 246, 0.8)", // Violet neon
         backgroundColor: "rgba(139, 92, 246, 0.08)",
-        boxShadow: "0 0 12px rgba(139, 92, 246, 0.4), inset 0 0 4px rgba(139, 92, 246, 0.2)"
+        boxShadow:
+          "0 0 12px rgba(139, 92, 246, 0.4), inset 0 0 4px rgba(139, 92, 246, 0.2)",
       });
       let label = target.tagName.toLowerCase();
       if (target.id) {
         label += `#${target.id}`;
       }
       if (target.className && typeof target.className === "string") {
-        const classes = target.className.split(/\s+/).filter(c => c && !c.startsWith("antigravity")).slice(0, 2);
+        const classes = target.className
+          .split(/\s+/)
+          .filter((c) => c && !c.startsWith("antigravity"))
+          .slice(0, 2);
         if (classes.length > 0) {
           label += `.${classes.join(".")}`;
         }
@@ -233,7 +248,7 @@
       top: `${top}px`,
       left: `${left}px`,
       width: `${width}px`,
-      height: `${height}px`
+      height: `${height}px`,
     });
 
     let label = `[Selected Bounding Box] ${target.tagName.toLowerCase()}`;
@@ -241,7 +256,10 @@
       label += `#${target.id}`;
     }
     if (target.className && typeof target.className === "string") {
-      const classes = target.className.split(/\s+/).filter(c => c && !c.startsWith("antigravity")).slice(0, 2);
+      const classes = target.className
+        .split(/\s+/)
+        .filter((c) => c && !c.startsWith("antigravity"))
+        .slice(0, 2);
       if (classes.length > 0) {
         label += `.${classes.join(".")}`;
       }
@@ -259,62 +277,74 @@
   }
 
   // Intercept element click to freeze standard navigation and open selection control panel
-  document.addEventListener("click", (e) => {
-    if (!hoverEnabled) return;
-    
-    // Do not intercept clicks within our own panel or overlays
-    if (
-      e.target === overlay || overlay.contains(e.target) || 
-      e.target === parentOverlay || parentOverlay.contains(e.target) ||
-      document.getElementById("antigravity-depth-panel")?.contains(e.target)
-    ) {
-      return;
-    }
-    
-    // Prevent normal link navigation/button clicks
-    e.preventDefault();
-    e.stopPropagation();
+  document.addEventListener(
+    "click",
+    (e) => {
+      if (!hoverEnabled) return;
 
-    if (isSelectingNextButton) {
-      nextButtonSelector = generateCssSelector(e.target);
-      const input = document.getElementById("ag-next-selector-input");
-      if (input) {
-        input.value = nextButtonSelector;
+      // Do not intercept clicks within our own panel or overlays
+      if (
+        e.target === overlay ||
+        overlay.contains(e.target) ||
+        e.target === parentOverlay ||
+        parentOverlay.contains(e.target) ||
+        document.getElementById("antigravity-depth-panel")?.contains(e.target)
+      ) {
+        return;
       }
-      isSelectingNextButton = false;
-      addPanelLog(`Selected Next Page Button selector: ${nextButtonSelector}`, "success");
-      
-      const selectBtn = document.getElementById("ag-select-next-btn");
-      if (selectBtn) {
-        selectBtn.textContent = "Select Next Button";
-        selectBtn.classList.remove("ag-btn-primary");
-        selectBtn.classList.add("ag-btn-secondary");
+
+      // Prevent normal link navigation/button clicks
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (isSelectingNextButton) {
+        nextButtonSelector = generateCssSelector(e.target);
+        const input = document.getElementById("ag-next-selector-input");
+        if (input) {
+          input.value = nextButtonSelector;
+        }
+        isSelectingNextButton = false;
+        addPanelLog(
+          `Selected Next Page Button selector: ${nextButtonSelector}`,
+          "success",
+        );
+
+        const selectBtn = document.getElementById("ag-select-next-btn");
+        if (selectBtn) {
+          selectBtn.textContent = "Select Next Button";
+          selectBtn.classList.remove("ag-btn-primary");
+          selectBtn.classList.add("ag-btn-secondary");
+        }
+        overlay.style.display = "none";
+        return;
       }
-      overlay.style.display = "none";
-      return;
-    }
 
-    console.log("🎯 Selected element for scoping:", e.target);
-    
-    injectPanel();
-    
-    clickedElement = e.target;
-    ancestors = getAncestors(clickedElement);
-    
-    // Set slider range
-    const slider = document.getElementById("ag-depth-slider");
-    slider.max = ancestors.length - 1;
-    slider.value = 0;
-    
-    // Initialize depth selection at level 0 (self)
-    handleDepthChange(0);
+      console.log("🎯 Selected element for scoping:", e.target);
 
-    // Slide in depth panel
-    const panel = document.getElementById("antigravity-depth-panel");
-    panel.classList.add("active");
-    
-    addPanelLog(`Visual scope initiated for element: <${clickedElement.tagName.toLowerCase()}>`, "success");
-  }, true);
+      injectPanel();
+
+      clickedElement = e.target;
+      ancestors = getAncestors(clickedElement);
+
+      // Set slider range
+      const slider = document.getElementById("ag-depth-slider");
+      slider.max = ancestors.length - 1;
+      slider.value = 0;
+
+      // Initialize depth selection at level 0 (self)
+      handleDepthChange(0);
+
+      // Slide in depth panel
+      const panel = document.getElementById("antigravity-depth-panel");
+      panel.classList.add("active");
+
+      addPanelLog(
+        `Visual scope initiated for element: <${clickedElement.tagName.toLowerCase()}>`,
+        "success",
+      );
+    },
+    true,
+  );
 
   /**
    * Helper to retrieve all ancestors up to the body element
@@ -350,7 +380,7 @@
   function handleDepthChange(depth) {
     if (depth >= ancestors.length) return;
     selectedParent = ancestors[depth];
-    
+
     let label = `${depth}`;
     if (depth === 0) label += " (Self)";
     else if (depth === 1) label += " (Parent)";
@@ -361,7 +391,9 @@
     updateParentOverlay(selectedParent);
     renderBreadcrumbs(depth);
 
-    addPanelLog(`Traversed hierarchy: level ${depth} tag selected (${selectedParent.tagName.toLowerCase()})`);
+    addPanelLog(
+      `Traversed hierarchy: level ${depth} tag selected (${selectedParent.tagName.toLowerCase()})`,
+    );
   }
 
   /**
@@ -371,21 +403,24 @@
     const container = document.getElementById("ag-tree-breadcrumbs");
     if (!container) return;
     container.innerHTML = "";
-    
+
     for (let i = ancestors.length - 1; i >= 0; i--) {
       const el = ancestors[i];
       const span = document.createElement("span");
-      span.className = "ag-tree-item" + (i === selectedDepth ? " selected" : "");
-      
+      span.className =
+        "ag-tree-item" + (i === selectedDepth ? " selected" : "");
+
       let text = el.tagName.toLowerCase();
       if (el.id) text += `#${el.id}`;
       else if (el.className && typeof el.className === "string") {
-        const firstClass = el.className.split(/\s+/).filter(c => c && !c.startsWith("antigravity"))[0];
+        const firstClass = el.className
+          .split(/\s+/)
+          .filter((c) => c && !c.startsWith("antigravity"))[0];
         if (firstClass) text += `.${firstClass}`;
       }
       span.textContent = text;
       span.style.cursor = "pointer";
-      
+
       // Let user click tags to change depth directly
       span.addEventListener("click", () => {
         const slider = document.getElementById("ag-depth-slider");
@@ -394,7 +429,7 @@
           handleDepthChange(i);
         }
       });
-      
+
       container.appendChild(span);
 
       if (i > 0) {
@@ -413,8 +448,12 @@
     const panelLogs = document.getElementById("ag-terminal-logs");
     if (panelLogs) {
       const p = document.createElement("p");
-      const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      
+      const timestamp = new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+
       if (type === "success") {
         p.style.color = "#34d399";
         p.textContent = `[${timestamp}] [success] ${text}`;
@@ -425,15 +464,17 @@
         p.style.color = "#cbd5e1";
         p.textContent = `[${timestamp}] [log] ${text}`;
       }
-      
+
       panelLogs.appendChild(p);
       panelLogs.scrollTop = panelLogs.scrollHeight;
     }
 
     if (chrome.runtime && chrome.runtime.sendMessage) {
-      chrome.runtime.sendMessage({ action: "logUpdate", text, type }).catch(() => {
-        // Ignore failures when the extension popup is not open
-      });
+      chrome.runtime
+        .sendMessage({ action: "logUpdate", text, type })
+        .catch(() => {
+          // Ignore failures when the extension popup is not open
+        });
     }
   }
 
@@ -454,7 +495,15 @@
         break;
       }
       if (cur.className && typeof cur.className === "string") {
-        const classes = cur.className.split(/\s+/).filter(c => c && !c.startsWith("antigravity") && !c.startsWith("selected") && c.trim() !== "");
+        const classes = cur.className
+          .split(/\s+/)
+          .filter(
+            (c) =>
+              c &&
+              !c.startsWith("antigravity") &&
+              !c.startsWith("selected") &&
+              c.trim() !== "",
+          );
         if (classes.length > 0) {
           part += `.${classes.join(".")}`;
         }
@@ -473,20 +522,31 @@
    */
   function cleanHtmlSnippet(element) {
     const clone = element.cloneNode(true);
-    
-    const selectorsToRemove = ["script", "style", "noscript", "iframe", "svg", "canvas", "embed", "object"];
-    selectorsToRemove.forEach(sel => {
-      clone.querySelectorAll(sel).forEach(node => node.remove());
+
+    const selectorsToRemove = [
+      "script",
+      "style",
+      "noscript",
+      "iframe",
+      "svg",
+      "canvas",
+      "embed",
+      "object",
+    ];
+    selectorsToRemove.forEach((sel) => {
+      clone.querySelectorAll(sel).forEach((node) => node.remove());
     });
-    
-    clone.querySelectorAll("img").forEach(img => {
+
+    clone.querySelectorAll("img").forEach((img) => {
       const src = img.getAttribute("src");
       if (src && src.startsWith("data:")) {
         img.setAttribute("src", "");
       }
     });
 
-    clone.querySelectorAll("[id^='antigravity']").forEach(node => node.remove());
+    clone
+      .querySelectorAll("[id^='antigravity']")
+      .forEach((node) => node.remove());
 
     return clone.innerHTML;
   }
@@ -498,54 +558,73 @@
     if (!selectedParent) return;
 
     addPanelLog("Starting parsing pipeline...", "info");
-    addPanelLog("Cleaning and sanitizing HTML snippet (removing scripts/media/base64)...");
+    addPanelLog(
+      "Cleaning and sanitizing HTML snippet (removing scripts/media/base64)...",
+    );
     const htmlSnippet = cleanHtmlSnippet(selectedParent);
-    
+
     document.getElementById("ag-codegen-btn").disabled = true;
     document.getElementById("ag-execute-btn").disabled = true;
-    document.getElementById("ag-code-view").textContent = "# Code generation in progress...";
-    
-    addPanelLog("Transmitting snippet to FastAPI control plane (http://127.0.0.1:8000)...");
-    
+    document.getElementById("ag-code-view").textContent =
+      "# Code generation in progress...";
+
+    addPanelLog(
+      "Transmitting snippet to FastAPI control plane (http://127.0.0.1:8000)...",
+    );
+
     fetch("http://127.0.0.1:8000/api/generate-parser", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         html_snippet: htmlSnippet,
-        context_url: window.location.href
+        context_url: window.location.href,
+      }),
+    })
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP error ${res.status}`);
+        }
+        return res.json();
       })
-    })
-    .then(res => {
-      if (!res.ok) {
-        throw new Error(`HTTP error ${res.status}`);
-      }
-      return res.json();
-    })
-    .then(data => {
-      document.getElementById("ag-codegen-btn").disabled = false;
-      
-      if (data.success) {
-        generatedCode = data.generated_code;
-        inferredSelectors = data.selectors;
-        
-        document.getElementById("ag-code-view").textContent = generatedCode;
-        document.getElementById("ag-execute-btn").disabled = false;
-        
-        addPanelLog("BeautifulSoup parser generated successfully!", "success");
-        addPanelLog(`Inferred Selectors: ${JSON.stringify(inferredSelectors)}`, "success");
-      } else {
-        addPanelLog(`Backend failed to generate code: ${data.message}`, "error");
-        document.getElementById("ag-code-view").textContent = `# Generation Failed:\n# ${data.message}`;
-      }
-    })
-    .catch(err => {
-      document.getElementById("ag-codegen-btn").disabled = false;
-      addPanelLog(`Failed to connect to FastAPI: ${err.message}`, "error");
-      addPanelLog("Please check if the backend is running at http://127.0.0.1:8000", "error");
-      document.getElementById("ag-code-view").textContent = `# Connection Error:\n# Could not reach FastAPI server at http://127.0.0.1:8000\n# Error: ${err.message}`;
-    });
+      .then((data) => {
+        document.getElementById("ag-codegen-btn").disabled = false;
+
+        if (data.success) {
+          generatedCode = data.generated_code;
+          inferredSelectors = data.selectors;
+
+          document.getElementById("ag-code-view").textContent = generatedCode;
+          document.getElementById("ag-execute-btn").disabled = false;
+
+          addPanelLog(
+            "BeautifulSoup parser generated successfully!",
+            "success",
+          );
+          addPanelLog(
+            `Inferred Selectors: ${JSON.stringify(inferredSelectors)}`,
+            "success",
+          );
+        } else {
+          addPanelLog(
+            `Backend failed to generate code: ${data.message}`,
+            "error",
+          );
+          document.getElementById("ag-code-view").textContent =
+            `# Generation Failed:\n# ${data.message}`;
+        }
+      })
+      .catch((err) => {
+        document.getElementById("ag-codegen-btn").disabled = false;
+        addPanelLog(`Failed to connect to FastAPI: ${err.message}`, "error");
+        addPanelLog(
+          "Please check if the backend is running at http://127.0.0.1:8000",
+          "error",
+        );
+        document.getElementById("ag-code-view").textContent =
+          `# Connection Error:\n# Could not reach FastAPI server at http://127.0.0.1:8000\n# Error: ${err.message}`;
+      });
   }
 
   /**
@@ -556,20 +635,29 @@
    */
   function runParserExecution() {
     if (!generatedCode) return;
-    
+
     // Check if auto-pagination is toggled
-    const isPaginateEnabled = document.getElementById("ag-paginate-toggle")?.checked;
+    const isPaginateEnabled =
+      document.getElementById("ag-paginate-toggle")?.checked;
     if (isPaginateEnabled) {
       if (!nextButtonSelector) {
-        addPanelLog("Please select a Next Page Button selector first.", "error");
+        addPanelLog(
+          "Please select a Next Page Button selector first.",
+          "error",
+        );
         return;
       }
-      
-      const maxPages = parseInt(document.getElementById("ag-max-pages").value, 10) || 3;
-      const delay = parseInt(document.getElementById("ag-page-delay").value, 10) || 1500;
-      
-      addPanelLog(`Initializing pagination dry-run. Target: ${maxPages} pages.`, "info");
-      
+
+      const maxPages =
+        parseInt(document.getElementById("ag-max-pages").value, 10) || 3;
+      const delay =
+        parseInt(document.getElementById("ag-page-delay").value, 10) || 1500;
+
+      addPanelLog(
+        `Initializing pagination dry-run. Target: ${maxPages} pages.`,
+        "info",
+      );
+
       const paginationState = {
         active: true,
         next_selector: nextButtonSelector,
@@ -579,9 +667,9 @@
         generated_code: generatedCode,
         collection_name: "visual_extract_items",
         unique_key: "title",
-        delay: delay
+        delay: delay,
       };
-      
+
       chrome.storage.local.set({ ag_pagination_state: paginationState }, () => {
         runPaginationLoop();
       });
@@ -590,62 +678,65 @@
 
     addPanelLog("Capturing full document HTML for dry run...", "info");
     const fullHtml = document.documentElement.outerHTML;
-    
+
     document.getElementById("ag-execute-btn").disabled = true;
     addPanelLog("Executing parser against page DOM inside backend sandbox...");
 
     fetch("http://127.0.0.1:8000/api/execute-parser", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         generated_code: generatedCode,
         full_html: fullHtml,
         collection_name: "visual_extract_items",
-        unique_key: "title"
-      })
+        unique_key: "title",
+      }),
     })
-    .then(res => {
-      if (!res.ok) {
-        throw new Error(`HTTP error ${res.status}`);
-      }
-      return res.json();
-    })
-    .then(data => {
-      document.getElementById("ag-execute-btn").disabled = false;
-      
-      if (data.success) {
-        addPanelLog(`Parsed ${data.items_count} items successfully! Check results below.`, "success");
-        if (data.logs) {
-          addPanelLog(`Backend logs:\n${data.logs}`);
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP error ${res.status}`);
         }
-        
-        const recordsView = document.getElementById("ag-records-view");
-        recordsView.innerHTML = "";
-        
-        if (data.parsed_items && data.parsed_items.length > 0) {
-          data.parsed_items.forEach((item, idx) => {
-            const card = document.createElement("div");
-            card.className = "ag-record-card";
-            card.innerHTML = `
+        return res.json();
+      })
+      .then((data) => {
+        document.getElementById("ag-execute-btn").disabled = false;
+
+        if (data.success) {
+          addPanelLog(
+            `Parsed ${data.items_count} items successfully! Check results below.`,
+            "success",
+          );
+          if (data.logs) {
+            addPanelLog(`Backend logs:\n${data.logs}`);
+          }
+
+          const recordsView = document.getElementById("ag-records-view");
+          recordsView.innerHTML = "";
+
+          if (data.parsed_items && data.parsed_items.length > 0) {
+            data.parsed_items.forEach((item, idx) => {
+              const card = document.createElement("div");
+              card.className = "ag-record-card";
+              card.innerHTML = `
               <div style="font-weight: 700; color: #f8fafc; margin-bottom: 2px;">[${idx + 1}] ${item.title || "No Title"}</div>
               <div style="color: #34d399; margin-bottom: 4px;">Price: $${item.price !== undefined ? item.price : "N/A"}</div>
-              <div style="color: #64748b; word-break: break-all;">Link: <a href="${item.source_url || '#'}" target="_blank" style="color: #a78bfa; text-decoration: none;">${item.source_url || "N/A"}</a></div>
+              <div style="color: #64748b; word-break: break-all;">Link: <a href="${item.source_url || "#"}" target="_blank" style="color: #a78bfa; text-decoration: none;">${item.source_url || "N/A"}</a></div>
             `;
-            recordsView.appendChild(card);
-          });
+              recordsView.appendChild(card);
+            });
+          } else {
+            recordsView.innerHTML = `<p style="color: #64748b; font-size: 10px; margin: 0; font-style: italic;">Zero items returned by parser.</p>`;
+          }
         } else {
-          recordsView.innerHTML = `<p style="color: #64748b; font-size: 10px; margin: 0; font-style: italic;">Zero items returned by parser.</p>`;
+          addPanelLog(`Execution failed: ${data.logs}`, "error");
         }
-      } else {
-        addPanelLog(`Execution failed: ${data.logs}`, "error");
-      }
-    })
-    .catch(err => {
-      document.getElementById("ag-execute-btn").disabled = false;
-      addPanelLog(`Execution request failed: ${err.message}`, "error");
-    });
+      })
+      .catch((err) => {
+        document.getElementById("ag-execute-btn").disabled = false;
+        addPanelLog(`Execution request failed: ${err.message}`, "error");
+      });
   }
 
   /**
@@ -653,39 +744,60 @@
    */
   function runPaginationLoop() {
     if (!chrome.storage || !chrome.storage.local) return;
-    
+
     chrome.storage.local.get(["ag_pagination_state"], (result) => {
       const state = result.ag_pagination_state;
       if (!state || !state.active) return;
-      
+
       if (state.current_page >= state.max_pages) {
-        addPanelLog("All requested pages captured. Submitting to backend parser...", "success");
+        addPanelLog(
+          "All requested pages captured. Submitting to backend parser...",
+          "success",
+        );
         finishPagination(state);
         return;
       }
-      
+
       const nextBtn = document.querySelector(state.next_selector);
       if (!nextBtn) {
-        addPanelLog(`Next page button not found using selector: '${state.next_selector}'. Completing extraction early with ${state.collected_html.length} pages.`, "error");
+        addPanelLog(
+          `Next page button not found using selector: '${state.next_selector}'. Completing extraction early with ${state.collected_html.length} pages.`,
+          "error",
+        );
         finishPagination(state);
         return;
       }
-      
-      addPanelLog(`Page ${state.current_page}/${state.max_pages} processed. Triggering navigation to next page...`, "info");
-      
+
+      addPanelLog(
+        `Page ${state.current_page}/${state.max_pages} processed. Triggering navigation to next page...`,
+        "info",
+      );
+
       state.current_page += 1;
       chrome.storage.local.set({ ag_pagination_state: state }, () => {
         nextBtn.click();
-        
+
         setTimeout(() => {
           chrome.storage.local.get(["ag_pagination_state"], (res) => {
             const current_state = res.ag_pagination_state;
-            if (current_state && current_state.active && current_state.current_page === state.current_page) {
-              addPanelLog(`SPA/AJAX update detected. Capturing Page ${current_state.current_page}...`, "info");
-              current_state.collected_html.push(document.documentElement.outerHTML);
-              chrome.storage.local.set({ ag_pagination_state: current_state }, () => {
-                runPaginationLoop();
-              });
+            if (
+              current_state &&
+              current_state.active &&
+              current_state.current_page === state.current_page
+            ) {
+              addPanelLog(
+                `SPA/AJAX update detected. Capturing Page ${current_state.current_page}...`,
+                "info",
+              );
+              current_state.collected_html.push(
+                document.documentElement.outerHTML,
+              );
+              chrome.storage.local.set(
+                { ag_pagination_state: current_state },
+                () => {
+                  runPaginationLoop();
+                },
+              );
             }
           });
         }, state.delay);
@@ -697,9 +809,14 @@
    * Finishes pagination and submits the HTML collection
    */
   function finishPagination(state) {
-    submitAggregatedHtmls(state.collected_html, state.generated_code, state.collection_name, state.unique_key);
+    submitAggregatedHtmls(
+      state.collected_html,
+      state.generated_code,
+      state.collection_name,
+      state.unique_key,
+    );
     chrome.storage.local.remove(["ag_pagination_state"]);
-    
+
     const codegenBtn = document.getElementById("ag-codegen-btn");
     const executeBtn = document.getElementById("ag-execute-btn");
     if (codegenBtn) codegenBtn.disabled = false;
@@ -710,64 +827,73 @@
    * Sends the collected page HTML array to the backend for unified parsing
    */
   function submitAggregatedHtmls(htmls, code, collectionName, uniqueKey) {
-    addPanelLog(`Submitting ${htmls.length} aggregated pages for parser execution...`, "info");
-    
+    addPanelLog(
+      `Submitting ${htmls.length} aggregated pages for parser execution...`,
+      "info",
+    );
+
     const executeBtn = document.getElementById("ag-execute-btn");
     if (executeBtn) executeBtn.disabled = true;
-    
+
     fetch("http://127.0.0.1:8000/api/execute-parser", {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         generated_code: code,
         full_htmls: htmls,
         collection_name: collectionName,
-        unique_key: uniqueKey
-      })
+        unique_key: uniqueKey,
+      }),
     })
-    .then(res => {
-      if (!res.ok) {
-        throw new Error(`HTTP error ${res.status}`);
-      }
-      return res.json();
-    })
-    .then(data => {
-      if (executeBtn) executeBtn.disabled = false;
-      
-      if (data.success) {
-        addPanelLog(`Parsed ${data.items_count} items across ${htmls.length} pages successfully! Check results below.`, "success");
-        if (data.logs) {
-          addPanelLog(`Backend logs:\n${data.logs}`);
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error(`HTTP error ${res.status}`);
         }
-        
-        const recordsView = document.getElementById("ag-records-view");
-        if (recordsView) {
-          recordsView.innerHTML = "";
-          if (data.parsed_items && data.parsed_items.length > 0) {
-            data.parsed_items.forEach((item, idx) => {
-              const card = document.createElement("div");
-              card.className = "ag-record-card";
-              card.innerHTML = `
+        return res.json();
+      })
+      .then((data) => {
+        if (executeBtn) executeBtn.disabled = false;
+
+        if (data.success) {
+          addPanelLog(
+            `Parsed ${data.items_count} items across ${htmls.length} pages successfully! Check results below.`,
+            "success",
+          );
+          if (data.logs) {
+            addPanelLog(`Backend logs:\n${data.logs}`);
+          }
+
+          const recordsView = document.getElementById("ag-records-view");
+          if (recordsView) {
+            recordsView.innerHTML = "";
+            if (data.parsed_items && data.parsed_items.length > 0) {
+              data.parsed_items.forEach((item, idx) => {
+                const card = document.createElement("div");
+                card.className = "ag-record-card";
+                card.innerHTML = `
                 <div style="font-weight: 700; color: #f8fafc; margin-bottom: 2px;">[${idx + 1}] ${item.title || "No Title"}</div>
                 <div style="color: #34d399; margin-bottom: 4px;">Price: $${item.price !== undefined ? item.price : "N/A"}</div>
-                <div style="color: #64748b; word-break: break-all;">Link: <a href="${item.source_url || '#'}" target="_blank" style="color: #a78bfa; text-decoration: none;">${item.source_url || "N/A"}</a></div>
+                <div style="color: #64748b; word-break: break-all;">Link: <a href="${item.source_url || "#"}" target="_blank" style="color: #a78bfa; text-decoration: none;">${item.source_url || "N/A"}</a></div>
               `;
-              recordsView.appendChild(card);
-            });
-          } else {
-            recordsView.innerHTML = `<p style="color: #64748b; font-size: 10px; margin: 0; font-style: italic;">Zero items returned by parser.</p>`;
+                recordsView.appendChild(card);
+              });
+            } else {
+              recordsView.innerHTML = `<p style="color: #64748b; font-size: 10px; margin: 0; font-style: italic;">Zero items returned by parser.</p>`;
+            }
           }
+        } else {
+          addPanelLog(`Execution failed: ${data.logs}`, "error");
         }
-      } else {
-        addPanelLog(`Execution failed: ${data.logs}`, "error");
-      }
-    })
-    .catch(err => {
-      if (executeBtn) executeBtn.disabled = false;
-      addPanelLog(`Aggregated execution request failed: ${err.message}`, "error");
-    });
+      })
+      .catch((err) => {
+        if (executeBtn) executeBtn.disabled = false;
+        addPanelLog(
+          `Aggregated execution request failed: ${err.message}`,
+          "error",
+        );
+      });
   }
 
   /**
@@ -778,29 +904,37 @@
     chrome.storage.local.get(["ag_pagination_state"], (result) => {
       const state = result.ag_pagination_state;
       if (state && state.active) {
-        console.log("🔄 Antigravity: Resuming pagination session from storage...", state);
-        
+        console.log(
+          "🔄 Antigravity: Resuming pagination session from storage...",
+          state,
+        );
+
         generatedCode = state.generated_code;
         nextButtonSelector = state.next_selector;
-        
+
         injectPanel();
-        
+
         const panel = document.getElementById("antigravity-depth-panel");
         if (panel) {
           panel.classList.add("active");
-          
+
           document.getElementById("ag-paginate-toggle").checked = true;
-          document.getElementById("ag-pagination-controls").style.display = "flex";
-          document.getElementById("ag-next-selector-input").value = nextButtonSelector;
+          document.getElementById("ag-pagination-controls").style.display =
+            "flex";
+          document.getElementById("ag-next-selector-input").value =
+            nextButtonSelector;
           document.getElementById("ag-max-pages").value = state.max_pages;
           document.getElementById("ag-page-delay").value = state.delay;
-          
+
           document.getElementById("ag-codegen-btn").disabled = true;
           document.getElementById("ag-execute-btn").disabled = true;
           document.getElementById("ag-code-view").textContent = generatedCode;
         }
 
-        addPanelLog(`Resuming pagination: Page ${state.current_page}/${state.max_pages} loaded.`, "info");
+        addPanelLog(
+          `Resuming pagination: Page ${state.current_page}/${state.max_pages} loaded.`,
+          "info",
+        );
 
         if (state.collected_html.length < state.current_page) {
           state.collected_html.push(document.documentElement.outerHTML);
@@ -1237,9 +1371,11 @@
     document.body.appendChild(panel);
 
     // Event listeners
-    document.getElementById("ag-close-panel-btn").addEventListener("click", () => {
-      closePanel();
-    });
+    document
+      .getElementById("ag-close-panel-btn")
+      .addEventListener("click", () => {
+        closePanel();
+      });
 
     const slider = document.getElementById("ag-depth-slider");
     slider.addEventListener("input", (e) => {
@@ -1256,44 +1392,57 @@
     });
 
     // Pagination Listeners
-    document.getElementById("ag-paginate-toggle").addEventListener("change", (e) => {
-      const controls = document.getElementById("ag-pagination-controls");
-      if (e.target.checked) {
-        controls.style.display = "flex";
-      } else {
-        controls.style.display = "none";
-      }
-    });
+    document
+      .getElementById("ag-paginate-toggle")
+      .addEventListener("change", (e) => {
+        const controls = document.getElementById("ag-pagination-controls");
+        if (e.target.checked) {
+          controls.style.display = "flex";
+        } else {
+          controls.style.display = "none";
+        }
+      });
 
-    document.getElementById("ag-select-next-btn").addEventListener("click", () => {
-      isSelectingNextButton = !isSelectingNextButton;
-      const selectBtn = document.getElementById("ag-select-next-btn");
-      if (isSelectingNextButton) {
-        selectBtn.textContent = "Click Next Button on Page...";
-        selectBtn.classList.remove("ag-btn-secondary");
-        selectBtn.classList.add("ag-btn-primary");
-        addPanelLog("Hover and click the 'Next' page button on the website.", "info");
-      } else {
-        selectBtn.textContent = "Select Next Button";
-        selectBtn.classList.remove("ag-btn-primary");
-        selectBtn.classList.add("ag-btn-secondary");
-      }
-    });
+    document
+      .getElementById("ag-select-next-btn")
+      .addEventListener("click", () => {
+        isSelectingNextButton = !isSelectingNextButton;
+        const selectBtn = document.getElementById("ag-select-next-btn");
+        if (isSelectingNextButton) {
+          selectBtn.textContent = "Click Next Button on Page...";
+          selectBtn.classList.remove("ag-btn-secondary");
+          selectBtn.classList.add("ag-btn-primary");
+          addPanelLog(
+            "Hover and click the 'Next' page button on the website.",
+            "info",
+          );
+        } else {
+          selectBtn.textContent = "Select Next Button";
+          selectBtn.classList.remove("ag-btn-primary");
+          selectBtn.classList.add("ag-btn-secondary");
+        }
+      });
 
-    document.getElementById("ag-next-selector-input").addEventListener("input", (e) => {
-      nextButtonSelector = e.target.value;
-    });
+    document
+      .getElementById("ag-next-selector-input")
+      .addEventListener("input", (e) => {
+        nextButtonSelector = e.target.value;
+      });
 
-    document.getElementById("ag-copy-code-btn").addEventListener("click", () => {
-      if (generatedCode) {
-        navigator.clipboard.writeText(generatedCode).then(() => {
-          const btn = document.getElementById("ag-copy-code-btn");
-          btn.textContent = "Copied!";
-          setTimeout(() => { btn.textContent = "Copy"; }, 2000);
-          addPanelLog("Parser script copied to clipboard.", "success");
-        });
-      }
-    });
+    document
+      .getElementById("ag-copy-code-btn")
+      .addEventListener("click", () => {
+        if (generatedCode) {
+          navigator.clipboard.writeText(generatedCode).then(() => {
+            const btn = document.getElementById("ag-copy-code-btn");
+            btn.textContent = "Copied!";
+            setTimeout(() => {
+              btn.textContent = "Copy";
+            }, 2000);
+            addPanelLog("Parser script copied to clipboard.", "success");
+          });
+        }
+      });
   }
 
   // Check and resume any active pagination session
@@ -1301,7 +1450,9 @@
 
   // Message listener from popup controls
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === "toggleHover") {
+    if (message.action === "getStatus") {
+      sendResponse({ enabled: hoverEnabled });
+    } else if (message.action === "toggleHover") {
       hoverEnabled = message.enabled;
       if (!hoverEnabled) {
         overlay.style.display = "none";
