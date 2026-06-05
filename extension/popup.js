@@ -74,4 +74,12 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   });
+
+  // Listen for logs sent from the content script
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.action === "logUpdate") {
+      addConsoleLog(message.text, message.type || "info");
+      sendResponse({ status: "ok" });
+    }
+  });
 });
