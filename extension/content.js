@@ -12,7 +12,7 @@
 
   console.log("🚀 Antigravity Scrape-as-Code Content Script Active.");
 
-  let hoverEnabled = true;
+  let hoverEnabled = false;
   let currentTarget = null;
 
   let clickedElement = null;
@@ -97,14 +97,7 @@
   parentOverlay.appendChild(parentBadge);
   document.body.appendChild(parentOverlay);
 
-  // Initialize state from storage
-  if (chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(["hoverEnabled"], (result) => {
-      if (result.hasOwnProperty("hoverEnabled")) {
-        hoverEnabled = result.hoverEnabled;
-      }
-    });
-  }
+
 
   // Track hover movements
   document.addEventListener("mouseover", (e) => {
@@ -917,9 +910,10 @@
     });
   }
 
-  // Message listener from popup controls
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === "toggleHover") {
+    if (message.action === "getStatus") {
+      sendResponse({ enabled: hoverEnabled });
+    } else if (message.action === "toggleHover") {
       hoverEnabled = message.enabled;
       if (!hoverEnabled) {
         overlay.style.display = "none";

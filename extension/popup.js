@@ -29,33 +29,46 @@ document.addEventListener("DOMContentLoaded", () => {
     consoleLogs.scrollTop = consoleLogs.scrollHeight;
   }
 
-  // Load initial hover state
-  if (chrome.storage && chrome.storage.local) {
-    chrome.storage.local.get(["hoverEnabled"], (result) => {
-      const isEnabled = result.hoverEnabled !== false; // Default to true
-      toggleHover.checked = isEnabled;
-      addConsoleLog(`Hover tracker initialized to: ${isEnabled ? "ON" : "OFF"}`);
-    });
-  }
+  // Load initial hover state from the active tab's content script
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const activeTab = tabs[0];
+    if (activeTab && activeTab.id) {
+      chrome.tabs.sendMessage(activeTab.id, { action: "getStatus" }, (response) => {
+        if (chrome.runtime.lastError || !response) {
+          // If content script is not loaded or didn't respond, default to off
+          toggleHover.checked = false;
+          addConsoleLog("Hover tracker initialized to: OFF");
+        } else {
+          toggleHover.checked = response.enabled;
+          addConsoleLog(`Hover tracker initialized to: ${response.enabled ? "ON" : "OFF"}`);
+        }
+      });
+    } else {
+      toggleHover.checked = false;
+      addConsoleLog("Hover tracker initialized to: OFF");
+    }
+  });
 
   // Handle toggle switch changes
   toggleHover.addEventListener("change", (e) => {
     const isEnabled = e.target.checked;
     
-    if (chrome.storage && chrome.storage.local) {
-      chrome.storage.local.set({ hoverEnabled: isEnabled }, () => {
-        addConsoleLog(`Hover tracking toggled ${isEnabled ? "ON" : "OFF"}`, isEnabled ? "success" : "info");
-        
-        // Notify content scripts in all tabs
-        chrome.tabs.query({}, (tabs) => {
-          tabs.forEach(tab => {
-            chrome.tabs.sendMessage(tab.id, { action: "toggleHover", enabled: isEnabled }).catch(() => {
-              // Ignore errors for tabs without active content scripts
-            });
-          });
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const activeTab = tabs[0];
+      if (activeTab && activeTab.id) {
+        chrome.tabs.sendMessage(activeTab.id, { action: "toggleHover", enabled: isEnabled }, (response) => {
+          if (chrome.runtime.lastError) {
+            addConsoleLog("Could not send enable command to active tab.", "error");
+            toggleHover.checked = !isEnabled; // Revert change
+          } else {
+            addConsoleLog(`Hover tracking toggled ${isEnabled ? "ON" : "OFF"}`, isEnabled ? "success" : "info");
+          }
         });
-      });
-    }
+      } else {
+        addConsoleLog("Could not identify active tab.", "error");
+        toggleHover.checked = !isEnabled; // Revert change
+      }
+    });
   });
 
   // Handle reset button clicks
