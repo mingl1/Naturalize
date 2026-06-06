@@ -25,9 +25,54 @@
   let isGeneratingCode = false;
   let isPaginationActive = false;
 
+  // Detail steps and recording variables
+  let extractionMode = "simple"; // 'simple' | 'advanced'
+  let isRecording = false;
+  let recordingPhase = "expand"; // 'expand' | 'close'
+  let recordedExpandActions = []; // array of { type: "click" | "wait", element, selector, delay }
+  let recordedCloseActions = []; // array of { type: "click" | "wait", element, selector, delay }
+  let lastActionTime = 0;
+
+  let detailStepsEnabled = false;
+  let expandSteps = []; // array of { type, target }
+  let closeSteps = [];  // array of { type, target }
+  let modalSelector = "";
+  let pickingStepIndex = null; // null | number | 'modal' | 'expand_<idx>' | 'close_<idx>'
+
   // Check if extension context is valid
   function isContextValid() {
     return typeof chrome !== "undefined" && chrome.runtime && !!chrome.runtime.id;
+  }
+
+  // Helper to proxy fetch requests through background service worker to bypass CSP/mixed-content blocks
+  async function fetchFromBackend(url, method, body) {
+    if (!isContextValid()) {
+      throw new Error("Extension context is invalid. Please reload the page.");
+    }
+    return new Promise((resolve, reject) => {
+      chrome.runtime.sendMessage(
+        {
+          action: "fetchBackend",
+          url,
+          method,
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body,
+        },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+          } else if (!response) {
+            reject(new Error("No response received from background worker."));
+          } else if (!response.success) {
+            reject(new Error(response.error || "Background fetch failed."));
+          } else {
+            resolve(response.data);
+          }
+        }
+      );
+    });
   }
 
   // Updates the Generate Parser button disabled state based on pagination settings and generation state
@@ -134,7 +179,8 @@
   document.addEventListener(
     "mouseover",
     (e) => {
-      if (!hoverEnabled) return;
+      if (!hoverEnabled && !isSelectingTargetAfterRecord) return;
+      if (isRecording) return;
 
       const target = e.target;
 
@@ -307,7 +353,104 @@
   document.addEventListener(
     "click",
     (e) => {
-      if (!hoverEnabled) return;
+      if (isRecording) {
+        // Exclude recorder bar and depth panel clicks
+        if (
+          document.getElementById("antigravity-recorder-bar")?.contains(e.target) ||
+          e.target.id === "antigravity-recorder-bar" ||
+          document.getElementById("antigravity-depth-panel")?.contains(e.target) ||
+          e.target.id === "antigravity-depth-panel"
+        ) {
+          return;
+        }
+
+        const now = Date.now();
+        const elapsed = lastActionTime > 0 ? now - lastActionTime : 0;
+        lastActionTime = now;
+
+        const selector = generateCssSelector(e.target);
+        const fullSelector = generateFullUniqueCssSelector(e.target);
+        const actions = recordingPhase === "expand" ? recordedExpandActions : recordedCloseActions;
+        
+        if (elapsed > 100) {
+          actions.push({ type: "wait", target: String(elapsed) });
+        }
+        actions.push({ 
+          type: "click", 
+          element: e.target, 
+          selector: selector,
+          fullSelector: fullSelector
+        });
+        
+        saveRecordingState();
+        addPanelLog(`[Recorded] Click on: <${e.target.tagName.toLowerCase()}>`);
+        
+        // Notify popup
+        if (isContextValid()) {
+          try {
+            chrome.runtime.sendMessage({
+              action: "actionRecorded",
+              phase: recordingPhase,
+              count: getRecordingClickCount(),
+              elementTag: e.target.tagName.toLowerCase()
+            });
+          } catch (err) {
+            // ignore if popup closed
+          }
+        }
+
+        updateRecorderBarUI();
+        return; // standard link/button behavior triggers on page
+      }
+
+      // 2. If picking element for a step or modal selector, capture and block click
+      if (pickingStepIndex !== null) {
+        if (document.getElementById("antigravity-depth-panel")?.contains(e.target)) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const target = e.target;
+        const selector = generateCssSelector(target);
+
+        if (pickingStepIndex === "modal") {
+          modalSelector = selector;
+          const input = document.getElementById("ag-modal-selector");
+          if (input) input.value = modalSelector;
+          addPanelLog(`Selected modal selector: ${modalSelector}`, "success");
+        } else {
+          const parts = pickingStepIndex.split("_");
+          const phase = parts[0];
+          const idx = parseInt(parts[1], 10);
+          const step = phase === "expand" ? expandSteps[idx] : closeSteps[idx];
+          
+          if (step) {
+            if (step.type === "click_relative") {
+              const itemSel = inferredSelectors?.item_selector;
+              const itemContainer = itemSel ? target.closest(itemSel) : null;
+              
+              if (itemContainer) {
+                step.target = generateRelativeCssSelector(target, itemContainer);
+                addPanelLog(`Selected relative selector: ${step.target}`, "success");
+              } else {
+                step.target = selector;
+                addPanelLog(`Selected selector (absolute fallback, no item container found): ${step.target}`, "warning");
+              }
+            } else {
+              step.target = selector;
+              addPanelLog(`Selected absolute selector: ${step.target}`, "success");
+            }
+          }
+        }
+
+        pickingStepIndex = null;
+        hoverEnabled = false;
+        overlay.style.display = "none";
+        renderDetailSteps();
+        return;
+      }
+
+      if (!hoverEnabled && !isSelectingTargetAfterRecord) return;
 
       // Do not intercept clicks within our own panel or overlays
       if (
@@ -345,6 +488,17 @@
         overlay.style.display = "none";
         updateCodegenButtonState();
         return;
+      }
+
+      if (isSelectingTargetAfterRecord) {
+        isSelectingTargetAfterRecord = false;
+        if (isContextValid()) {
+          try {
+            chrome.runtime.sendMessage({ action: "scopingFinalized" });
+          } catch (err) {
+            // ignore
+          }
+        }
       }
 
       console.log("🎯 Selected element for scoping:", e.target);
@@ -418,6 +572,8 @@
 
     updateParentOverlay(selectedParent);
     renderBreadcrumbs(depth);
+
+    processRecordedActions(selectedParent);
 
     addPanelLog(
       `Traversed hierarchy: level ${depth} tag selected (${selectedParent.tagName.toLowerCase()})`,
@@ -586,7 +742,7 @@
   /**
    * Submits HTML snippet to FastAPI generate-parser endpoint
    */
-  function runCodeGen() {
+  async function runCodeGen() {
     if (!selectedParent) return;
 
     const isPaginateEnabled = document.getElementById("ag-paginate-toggle")?.checked;
@@ -599,7 +755,31 @@
     addPanelLog(
       "Cleaning and sanitizing HTML snippet (removing scripts/media/base64)...",
     );
-    const htmlSnippet = cleanHtmlSnippet(selectedParent);
+
+    let finalSelectedParent = selectedParent;
+    if (detailStepsEnabled && (expandSteps.length > 0 || closeSteps.length > 0)) {
+      const firstItem = getItemContainerOfClicked(clickedElement, selectedParent);
+      if (firstItem) {
+        addPanelLog("Expanding first item to capture detailed code generation snippet...", "info");
+        await executeStepsForElement(firstItem, expandSteps);
+
+        finalSelectedParent = selectedParent.cloneNode(true);
+        if (modalSelector) {
+          const modalEl = document.querySelector(modalSelector);
+          if (modalEl) {
+            const children = Array.from(selectedParent.children);
+            const idx = children.indexOf(firstItem);
+            if (idx !== -1 && finalSelectedParent.children[idx]) {
+              finalSelectedParent.children[idx].appendChild(modalEl.cloneNode(true));
+            }
+          }
+        }
+
+        await executeStepsForElement(firstItem, closeSteps);
+      }
+    }
+
+    const htmlSnippet = cleanHtmlSnippet(finalSelectedParent);
 
     isGeneratingCode = true;
     updateCodegenButtonState();
@@ -611,22 +791,20 @@
       "Transmitting snippet to FastAPI control plane (http://127.0.0.1:8000)...",
     );
 
-    fetch("http://127.0.0.1:8000/api/generate-parser", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        html_snippet: htmlSnippet,
-        context_url: window.location.href,
-      }),
+    const userContext = document.getElementById("ag-user-context-input")?.value || "";
+    const webpageContext = {
+      url: window.location.href,
+      title: document.title || "",
+      description: document.querySelector('meta[name="description"]')?.getAttribute("content") || "",
+      keywords: document.querySelector('meta[name="keywords"]')?.getAttribute("content") || ""
+    };
+
+    fetchFromBackend("http://127.0.0.1:8000/api/generate-parser", "POST", {
+      html_snippet: htmlSnippet,
+      context_url: window.location.href,
+      user_context: userContext,
+      webpage_context: webpageContext,
     })
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP error ${res.status}`);
-        }
-        return res.json();
-      })
       .then((data) => {
         isGeneratingCode = false;
         updateCodegenButtonState();
@@ -689,7 +867,11 @@
           timestamp: Date.now(),
           code: code,
           selectors: selectors,
-          title: document.title || window.location.hostname
+          title: document.title || window.location.hostname,
+          detail_steps_enabled: detailStepsEnabled,
+          expand_steps: expandSteps,
+          close_steps: closeSteps,
+          modal_selector: modalSelector
         };
 
         const existingIdx = parsers.findIndex(p => p.code === code);
@@ -697,6 +879,10 @@
           parsers[existingIdx].timestamp = Date.now();
           parsers[existingIdx].url = window.location.href;
           parsers[existingIdx].title = document.title || window.location.hostname;
+          parsers[existingIdx].detail_steps_enabled = detailStepsEnabled;
+          parsers[existingIdx].expand_steps = expandSteps;
+          parsers[existingIdx].close_steps = closeSteps;
+          parsers[existingIdx].modal_selector = modalSelector;
         } else {
           parsers.unshift(newParser);
         }
@@ -720,7 +906,7 @@
   /**
    * Runs the dry run parser execution against the full document HTML in the sandbox
    */
-  function runParserExecution() {
+  async function runParserExecution() {
     if (!generatedCode) return;
 
     // Check if auto-pagination is toggled
@@ -745,12 +931,14 @@
         "info",
       );
 
+      const firstPageHtml = await getExpandedPageHtml();
+
       const paginationState = {
         active: true,
         next_selector: nextButtonSelector,
         max_pages: maxPages,
         current_page: 1,
-        collected_html: [document.documentElement.outerHTML],
+        collected_html: [firstPageHtml],
         generated_code: generatedCode,
         collection_name: "visual_extract_items",
         unique_key: "title",
@@ -776,29 +964,17 @@
     }
 
     addPanelLog("Capturing full document HTML for dry run...", "info");
-    const fullHtml = document.documentElement.outerHTML;
+    const fullHtml = await getExpandedPageHtml();
 
     document.getElementById("ag-execute-btn").disabled = true;
     addPanelLog("Executing parser against page DOM inside backend sandbox...");
 
-    fetch("http://127.0.0.1:8000/api/execute-parser", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        generated_code: generatedCode,
-        full_html: fullHtml,
-        collection_name: "visual_extract_items",
-        unique_key: "title",
-      }),
+    fetchFromBackend("http://127.0.0.1:8000/api/execute-parser", "POST", {
+      generated_code: generatedCode,
+      full_html: fullHtml,
+      collection_name: "visual_extract_items",
+      unique_key: "title",
     })
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP error ${res.status}`);
-        }
-        return res.json();
-      })
       .then((data) => {
         document.getElementById("ag-execute-btn").disabled = false;
 
@@ -898,21 +1074,22 @@
                           `SPA/AJAX update detected. Capturing Page ${current_state.current_page}...`,
                           "info",
                         );
-                        current_state.collected_html.push(
-                          document.documentElement.outerHTML,
-                        );
-                        if (isContextValid() && chrome.storage && chrome.storage.local) {
-                          try {
-                            chrome.storage.local.set(
-                              { ag_pagination_state: current_state },
-                              () => {
-                                runPaginationLoop();
-                              },
-                            );
-                          } catch (e) {
-                            addPanelLog("Failed to write state: context invalidated.", "error");
+                        (async () => {
+                          const expandedHtml = await getExpandedPageHtml();
+                          current_state.collected_html.push(expandedHtml);
+                          if (isContextValid() && chrome.storage && chrome.storage.local) {
+                            try {
+                              chrome.storage.local.set(
+                                { ag_pagination_state: current_state },
+                                () => {
+                                  runPaginationLoop();
+                                },
+                              );
+                            } catch (e) {
+                              addPanelLog("Failed to write state: context invalidated.", "error");
+                            }
                           }
-                        }
+                        })();
                       }
                     });
                   } catch (e) {
@@ -967,24 +1144,12 @@
     const executeBtn = document.getElementById("ag-execute-btn");
     if (executeBtn) executeBtn.disabled = true;
 
-    fetch("http://127.0.0.1:8000/api/execute-parser", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        generated_code: code,
-        full_htmls: htmls,
-        collection_name: collectionName,
-        unique_key: uniqueKey,
-      }),
+    fetchFromBackend("http://127.0.0.1:8000/api/execute-parser", "POST", {
+      generated_code: code,
+      full_htmls: htmls,
+      collection_name: collectionName,
+      unique_key: uniqueKey,
     })
-      .then((res) => {
-        if (!res.ok) {
-          throw new Error(`HTTP error ${res.status}`);
-        }
-        return res.json();
-      })
       .then((data) => {
         if (executeBtn) executeBtn.disabled = false;
 
@@ -1071,18 +1236,21 @@
           );
 
           if (state.collected_html.length < state.current_page) {
-            state.collected_html.push(document.documentElement.outerHTML);
-            if (isContextValid() && chrome.storage && chrome.storage.local) {
-              try {
-                chrome.storage.local.set({ ag_pagination_state: state }, () => {
-                  setTimeout(() => {
-                    runPaginationLoop();
-                  }, state.delay);
-                });
-              } catch (e) {
-                addPanelLog("Failed to write resume state: context invalidated.", "error");
+            (async () => {
+              const expandedHtml = await getExpandedPageHtml();
+              state.collected_html.push(expandedHtml);
+              if (isContextValid() && chrome.storage && chrome.storage.local) {
+                try {
+                  chrome.storage.local.set({ ag_pagination_state: state }, () => {
+                    setTimeout(() => {
+                      runPaginationLoop();
+                    }, state.delay);
+                  });
+                } catch (e) {
+                  addPanelLog("Failed to write resume state: context invalidated.", "error");
+                }
               }
-            }
+            })();
           } else {
             setTimeout(() => {
               runPaginationLoop();
@@ -1091,8 +1259,616 @@
         }
       });
     } catch (e) {
-      // Ignore initial resume failures
+      console.error("Error in checkAndResumePagination:", e);
     }
+  }
+
+  let isSelectingTargetAfterRecord = false;
+
+  function saveRecordingState() {
+    if (isContextValid() && chrome.storage && chrome.storage.local) {
+      try {
+        chrome.storage.local.set({
+          ag_recording_state: {
+            active: isRecording,
+            phase: recordingPhase,
+            expand_actions: recordedExpandActions,
+            close_actions: recordedCloseActions,
+            last_action_time: lastActionTime
+          }
+        });
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  function clearRecordingState() {
+    if (isContextValid() && chrome.storage && chrome.storage.local) {
+      try {
+        chrome.storage.local.remove(["ag_recording_state"]);
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  function getRecordingClickCount() {
+    const expandClicks = recordedExpandActions.filter(a => a.type === "click").length;
+    const closeClicks = recordedCloseActions.filter(a => a.type === "click").length;
+    return expandClicks + closeClicks;
+  }
+
+  function toggleRecordingPhase() {
+    if (recordingPhase === "expand") {
+      recordingPhase = "close";
+      addPanelLog("Switched recorder to Close Steps phase.", "info");
+    } else {
+      recordingPhase = "expand";
+      addPanelLog("Switched recorder to Expand Steps phase.", "info");
+    }
+    saveRecordingState();
+  }
+
+  function cancelRecordingSession() {
+    isRecording = false;
+    isSelectingTargetAfterRecord = false;
+    recordedExpandActions = [];
+    recordedCloseActions = [];
+    removeRecorderBar();
+    clearRecordingState();
+    hoverEnabled = false;
+    overlay.style.display = "none";
+    addPanelLog("Recording session cancelled.", "info");
+  }
+
+  function finalizeRecordingSession() {
+    isRecording = false;
+    isSelectingTargetAfterRecord = true;
+    removeRecorderBar();
+    clearRecordingState();
+    addPanelLog("Action recording finalized. Please hover and click the item element to define scope.", "success");
+  }
+
+  function showRecorderBar() {
+    removeRecorderBar();
+
+    if (!document.getElementById("antigravity-recorder-styles")) {
+      const style = document.createElement("style");
+      style.id = "antigravity-recorder-styles";
+      style.textContent = `
+        #antigravity-recorder-bar {
+          position: fixed;
+          top: 20px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 2147483647;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 10px 20px;
+          background: rgba(15, 23, 42, 0.75);
+          backdrop-filter: blur(12px) saturate(180%);
+          -webkit-backdrop-filter: blur(12px) saturate(180%);
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          border-radius: 40px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+          font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          color: #f8fafc;
+          pointer-events: auto;
+          user-select: none;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .ag-rec-title {
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.15em;
+          color: #818cf8;
+        }
+
+        .ag-rec-divider {
+          color: rgba(255, 255, 255, 0.2);
+          font-size: 14px;
+        }
+
+        .ag-rec-status {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          font-weight: 500;
+        }
+
+        .ag-rec-pulse-dot {
+          width: 8px;
+          height: 8px;
+          background-color: #ef4444;
+          border-radius: 50%;
+          box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+          animation: ag-pulse 1.6s infinite;
+        }
+
+        @keyframes ag-pulse {
+          0% {
+            transform: scale(0.95);
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+          }
+          70% {
+            transform: scale(1);
+            box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+          }
+          100% {
+            transform: scale(0.95);
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+          }
+        }
+
+        #ag-rec-phase-text {
+          font-weight: 700;
+          color: #fb923c;
+        }
+
+        #ag-rec-count-text {
+          font-weight: 700;
+          color: #34d399;
+        }
+
+        .ag-rec-btn {
+          background: none;
+          border: none;
+          color: #94a3b8;
+          font-family: inherit;
+          font-size: 11px;
+          font-weight: 600;
+          cursor: pointer;
+          padding: 6px 12px;
+          border-radius: 20px;
+          transition: all 0.2s ease;
+        }
+
+        .ag-rec-btn:hover {
+          color: #f8fafc;
+          background: rgba(255, 255, 255, 0.1);
+        }
+
+        .ag-rec-btn-done {
+          color: #34d399;
+          background: rgba(52, 211, 153, 0.1);
+          border: 1px solid rgba(52, 211, 153, 0.2);
+        }
+
+        .ag-rec-btn-done:hover {
+          color: #10b981;
+          background: rgba(52, 211, 153, 0.2);
+          border-color: rgba(52, 211, 153, 0.4);
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    const bar = document.createElement("div");
+    bar.id = "antigravity-recorder-bar";
+    bar.innerHTML = `
+      <div class="ag-rec-title">ANTIGRAVITY ADVANCED RECORDER</div>
+      <div class="ag-rec-divider">|</div>
+      <div class="ag-rec-status">
+        <span class="ag-rec-pulse-dot"></span>
+        Recording: <span id="ag-rec-phase-text">Expand Steps</span> (<span id="ag-rec-count-text">0</span>)
+      </div>
+      <div class="ag-rec-divider">|</div>
+      <button id="ag-rec-toggle-phase-btn" class="ag-rec-btn">[Switch to Close Steps]</button>
+      <div class="ag-rec-divider">|</div>
+      <button id="ag-rec-finalize-btn" class="ag-rec-btn ag-rec-btn-done">[Done: Select Catalog Item]</button>
+    `;
+
+    document.body.appendChild(bar);
+
+    document.getElementById("ag-rec-toggle-phase-btn").addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleRecordingPhase();
+      updateRecorderBarUI();
+
+      if (isContextValid()) {
+        try {
+          chrome.runtime.sendMessage({
+            action: "actionRecorded",
+            phase: recordingPhase,
+            count: getRecordingClickCount(),
+            elementTag: "phase-toggle"
+          });
+        } catch (err) {}
+      }
+    });
+
+    document.getElementById("ag-rec-finalize-btn").addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      finalizeRecordingSession();
+
+      if (isContextValid()) {
+        try {
+          chrome.runtime.sendMessage({ action: "recordingFinalized" });
+        } catch (err) {}
+      }
+    });
+
+    updateRecorderBarUI();
+  }
+
+  function updateRecorderBarUI() {
+    const phaseText = document.getElementById("ag-rec-phase-text");
+    const countText = document.getElementById("ag-rec-count-text");
+    const toggleBtn = document.getElementById("ag-rec-toggle-phase-btn");
+
+    if (phaseText) {
+      phaseText.textContent = recordingPhase === "expand" ? "Expand Steps" : "Close Steps";
+      phaseText.style.color = recordingPhase === "expand" ? "#fb923c" : "#f87171";
+    }
+    if (countText) {
+      countText.textContent = getRecordingClickCount();
+    }
+    if (toggleBtn) {
+      toggleBtn.textContent = recordingPhase === "expand" ? "[Switch to Close Steps]" : "[Switch to Expand Steps]";
+    }
+  }
+
+  function removeRecorderBar() {
+    const bar = document.getElementById("antigravity-recorder-bar");
+    if (bar) bar.remove();
+  }
+
+  function generateFullUniqueCssSelector(el) {
+    if (!el) return "";
+    if (el === document.body) return "body";
+    if (el === document.documentElement) return "html";
+    let parts = [];
+    let cur = el;
+    while (cur && cur.tagName !== "BODY" && cur.tagName !== "HTML") {
+      let part = cur.tagName.toLowerCase();
+      if (cur.id) {
+        part += `#${cur.id}`;
+      }
+      if (cur.className && typeof cur.className === "string") {
+        const classes = cur.className
+          .split(/\s+/)
+          .filter(
+            (c) =>
+              c &&
+              !c.startsWith("antigravity") &&
+              !c.startsWith("selected") &&
+              c.trim() !== "",
+          );
+        if (classes.length > 0) {
+          part += `.${classes.join(".")}`;
+        }
+      }
+      if (cur.parentElement) {
+        const siblings = Array.from(cur.parentElement.children);
+        const idx = siblings.indexOf(cur) + 1;
+        part += `:nth-child(${idx})`;
+      }
+      parts.unshift(part);
+      cur = cur.parentElement;
+    }
+    parts.unshift("body");
+    return parts.join(" > ");
+  }
+
+  function getRelativeSelector(fullSelector, parentSelector, parentElement) {
+    const el = document.querySelector(fullSelector);
+    if (el && parentElement && parentElement.contains(el)) {
+      return generateRelativeCssSelector(el, parentElement);
+    }
+    if (fullSelector.startsWith(parentSelector + " > ")) {
+      let rel = fullSelector.slice(parentSelector.length + 3);
+      let cleanRel = rel.replace(/:nth-child\(\d+\)/g, "");
+      return cleanRel;
+    }
+    return fullSelector;
+  }
+
+  function generateRelativeCssSelector(el, parent) {
+    if (!parent || !parent.contains(el) || el === parent) {
+      return generateCssSelector(el);
+    }
+    let parts = [];
+    let cur = el;
+    while (cur && cur !== parent) {
+      let part = cur.tagName.toLowerCase();
+      if (cur.className && typeof cur.className === "string") {
+        const classes = cur.className
+          .split(/\s+/)
+          .filter(
+            (c) =>
+              c &&
+              !c.startsWith("antigravity") &&
+              !c.startsWith("selected") &&
+              c.trim() !== "",
+          );
+        if (classes.length > 0) {
+          part += `.${classes.join(".")}`;
+        }
+      }
+      parts.unshift(part);
+      cur = cur.parentElement;
+    }
+    return parts.join(" > ");
+  }
+
+  function getItemContainerOfClicked(clicked, parent) {
+    if (!parent || !clicked || !parent.contains(clicked)) return null;
+    let cur = clicked;
+    while (cur && cur.parentElement !== parent && cur.parentElement !== document.body) {
+      cur = cur.parentElement;
+    }
+    return cur;
+  }
+
+  function processRecordedActions(parent) {
+    if (recordedExpandActions.length === 0 && recordedCloseActions.length === 0) return;
+
+    const itemContainer = getItemContainerOfClicked(clickedElement, parent);
+    
+    expandSteps = mapRecordedActionsToSteps(recordedExpandActions, itemContainer);
+    closeSteps = mapRecordedActionsToSteps(recordedCloseActions, itemContainer);
+    
+    detailStepsEnabled = true;
+
+    // Refresh UI
+    renderDetailSteps();
+  }
+
+  function mapRecordedActionsToSteps(actions, itemContainer) {
+    const steps = [];
+    const parentSelector = itemContainer ? generateFullUniqueCssSelector(itemContainer) : null;
+
+    actions.forEach(action => {
+      if (action.type === "wait") {
+        steps.push({ type: "wait", target: action.target });
+      } else if (action.type === "click") {
+        let isInside = false;
+        let relativeSelector = "";
+
+        if (action.element && action.element.isConnected && itemContainer) {
+          if (itemContainer.contains(action.element)) {
+            isInside = true;
+            relativeSelector = generateRelativeCssSelector(action.element, itemContainer);
+          }
+        } else if (parentSelector && action.fullSelector) {
+          if (action.fullSelector === parentSelector || action.fullSelector.startsWith(parentSelector + " > ")) {
+            isInside = true;
+            relativeSelector = getRelativeSelector(action.fullSelector, parentSelector, itemContainer);
+          }
+        }
+
+        if (isInside) {
+          steps.push({ type: "click_relative", target: relativeSelector });
+        } else {
+          steps.push({ type: "click_absolute", target: action.selector || action.fullSelector });
+        }
+      }
+    });
+    return steps;
+  }
+
+  function renderDetailSteps() {
+    const toggle = document.getElementById("ag-details-toggle");
+    if (toggle) toggle.checked = detailStepsEnabled;
+
+    const controls = document.getElementById("ag-details-controls");
+    if (controls) controls.style.display = detailStepsEnabled ? "flex" : "none";
+
+    const modalInput = document.getElementById("ag-modal-selector");
+    if (modalInput) modalInput.value = modalSelector;
+
+    const expandContainer = document.getElementById("ag-expand-steps-list");
+    if (expandContainer) {
+      expandContainer.innerHTML = "";
+      expandSteps.forEach((step, idx) => {
+        expandContainer.appendChild(createStepRowHTML("expand", step, idx));
+      });
+    }
+
+    const closeContainer = document.getElementById("ag-close-steps-list");
+    if (closeContainer) {
+      closeContainer.innerHTML = "";
+      closeSteps.forEach((step, idx) => {
+        closeContainer.appendChild(createStepRowHTML("close", step, idx));
+      });
+    }
+  }
+
+  function createStepRowHTML(phase, step, idx) {
+    const row = document.createElement("div");
+    row.className = "ag-step-row";
+    Object.assign(row.style, {
+      display: "flex",
+      gap: "6px",
+      alignItems: "center",
+      marginTop: "4px"
+    });
+    row.setAttribute("data-phase", phase);
+    row.setAttribute("data-index", idx);
+
+    let placeholder = "Selector inside item";
+    if (step.type === "click_absolute") placeholder = "Selector on page";
+    else if (step.type === "wait") placeholder = "Delay in ms";
+
+    row.innerHTML = `
+      <select class="ag-input ag-step-type" style="flex: 1.2; height: 28px; padding: 2px 4px; font-size: 9px; line-height: 1.2;">
+        <option value="click_relative" ${step.type === 'click_relative' ? 'selected' : ''}>Click (Rel)</option>
+        <option value="click_absolute" ${step.type === 'click_absolute' ? 'selected' : ''}>Click (Abs)</option>
+        <option value="wait" ${step.type === 'wait' ? 'selected' : ''}>Wait (ms)</option>
+      </select>
+      <input type="text" class="ag-input ag-step-target" placeholder="${placeholder}" value="${step.target || ''}" style="flex: 2; height: 28px; font-size: 9.5px; line-height: 1.2;">
+      ${step.type !== 'wait' ? `
+        <button class="ag-btn ag-btn-secondary ag-pick-step-btn" style="flex: 0.4; height: 28px; padding: 0 4px; min-height: 28px; font-size: 9px;">
+          Pick
+        </button>
+      ` : ''}
+      <button class="ag-btn ag-btn-secondary ag-delete-step-btn" style="flex: 0.3; height: 28px; padding: 0; min-height: 28px; color: var(--color-brand-rose); font-size: 14px; font-weight: bold;">
+        &times;
+      </button>
+    `;
+
+    const typeSelect = row.querySelector(".ag-step-type");
+    const targetInput = row.querySelector(".ag-step-target");
+    const pickBtn = row.querySelector(".ag-pick-step-btn");
+    const deleteBtn = row.querySelector(".ag-delete-step-btn");
+
+    typeSelect.addEventListener("change", (e) => {
+      step.type = e.target.value;
+      if (step.type === "wait") {
+        step.target = "500";
+      } else {
+        step.target = "";
+      }
+      renderDetailSteps();
+    });
+
+    targetInput.addEventListener("input", (e) => {
+      step.target = e.target.value;
+    });
+
+    if (pickBtn) {
+      pickBtn.addEventListener("click", () => {
+        startPickingForStep(phase, idx);
+      });
+    }
+
+    deleteBtn.addEventListener("click", () => {
+      if (phase === "expand") {
+        expandSteps.splice(idx, 1);
+      } else {
+        closeSteps.splice(idx, 1);
+      }
+      renderDetailSteps();
+    });
+
+    return row;
+  }
+
+  function startPickingForStep(phase, idx) {
+    pickingStepIndex = `${phase}_${idx}`;
+    hoverEnabled = true;
+    addPanelLog(`Click on the target element on the page to set selector...`, "info");
+    
+    const row = document.querySelector(`.ag-step-row[data-phase="${phase}"][data-index="${idx}"]`);
+    if (row) {
+      const pickBtn = row.querySelector(".ag-pick-step-btn");
+      if (pickBtn) {
+        pickBtn.textContent = "Click...";
+        pickBtn.style.color = "var(--color-brand-emerald)";
+      }
+    }
+  }
+
+  function startPickingForModal() {
+    pickingStepIndex = "modal";
+    hoverEnabled = true;
+    addPanelLog(`Click on the modal/popup element on the page to set selector...`, "info");
+    
+    const pickBtn = document.getElementById("ag-pick-modal-btn");
+    if (pickBtn) {
+      pickBtn.textContent = "Click...";
+      pickBtn.style.color = "var(--color-brand-emerald)";
+    }
+  }
+
+  async function executeStepsForElement(item, steps) {
+    for (const step of steps) {
+      if (step.type === "click_relative") {
+        if (step.target) {
+          const target = item.querySelector(step.target);
+          if (target) {
+            target.scrollIntoView({ block: "nearest" });
+            target.click();
+          } else {
+            addPanelLog(`  [Step warning] Relative target not found: '${step.target}'`, "error");
+          }
+        }
+      } else if (step.type === "click_absolute") {
+        if (step.target) {
+          const target = document.querySelector(step.target);
+          if (target) {
+            target.scrollIntoView({ block: "nearest" });
+            target.click();
+          } else {
+            addPanelLog(`  [Step warning] Absolute target not found: '${step.target}'`, "error");
+          }
+        }
+      } else if (step.type === "wait") {
+        const ms = parseInt(step.target, 10) || 500;
+        await new Promise(resolve => setTimeout(resolve, ms));
+      }
+    }
+  }
+
+  async function getExpandedPageHtml() {
+    if (!detailStepsEnabled || (expandSteps.length === 0 && closeSteps.length === 0)) {
+      return document.documentElement.outerHTML;
+    }
+
+    const itemSel = inferredSelectors?.item_selector;
+    if (!itemSel) {
+      addPanelLog("Warning: No item selector found. Skipping detail steps.", "error");
+      return document.documentElement.outerHTML;
+    }
+
+    const items = Array.from(document.querySelectorAll(itemSel));
+    if (items.length === 0) {
+      addPanelLog(`No items found matching selector: '${itemSel}'. Skipping detail steps.`, "info");
+      return document.documentElement.outerHTML;
+    }
+
+    addPanelLog(`Executing detail expansion for ${items.length} items on page...`, "info");
+
+    const expandedItemHtmls = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      addPanelLog(`  Expanding item ${i + 1}/${items.length}...`, "info");
+      
+      await executeStepsForElement(item, expandSteps);
+
+      const itemClone = item.cloneNode(true);
+
+      if (modalSelector) {
+        const modalEl = document.querySelector(modalSelector);
+        if (modalEl) {
+          itemClone.appendChild(modalEl.cloneNode(true));
+        }
+      }
+
+      expandedItemHtmls.push(itemClone.outerHTML);
+
+      await executeStepsForElement(item, closeSteps);
+    }
+
+    const pageClone = document.documentElement.cloneNode(true);
+    
+    const panelInClone = pageClone.querySelector("#antigravity-depth-panel");
+    if (panelInClone) panelInClone.remove();
+
+    const clonedItems = pageClone.querySelectorAll(itemSel);
+    clonedItems.forEach((clonedItem, idx) => {
+      if (expandedItemHtmls[idx]) {
+        const parent = clonedItem.parentNode;
+        if (parent) {
+          const temp = document.createElement("div");
+          temp.innerHTML = expandedItemHtmls[idx];
+          const newChild = temp.firstElementChild;
+          if (newChild) {
+            parent.replaceChild(newChild, clonedItem);
+          }
+        }
+      }
+    });
+
+    addPanelLog("Detail expansion steps completed successfully.", "success");
+    return pageClone.outerHTML;
   }
 
   /**
@@ -1523,18 +2299,62 @@
           </div>
         </div>
 
-        <!-- Actions -->
+        <!-- User Context Input -->
         <div class="ag-panel-section">
-          <span class="ag-section-label">3. Scrape Actions</span>
-          <div class="ag-btn-group">
-            <button id="ag-codegen-btn" class="ag-btn ag-btn-primary">Generate Parser</button>
-            <button id="ag-execute-btn" class="ag-btn ag-btn-secondary" disabled>Dry Run Execution</button>
+          <span class="ag-section-label">3. Parsing Instructions / Context</span>
+          <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+            <textarea id="ag-user-context-input" placeholder="Optional: Describe fields or instructions (e.g. 'Extract rating and rating count', 'This is a job board, extract salary')." class="ag-input" style="height: 50px; resize: vertical; width: 100%; box-sizing: border-box; font-family: inherit; font-size: 10px;"></textarea>
+          </div>
+        </div>
+
+        <!-- Item Detail Expansion -->
+        <div class="ag-panel-section" style="border-top: 1px solid var(--color-border); padding-top: 12px; margin-top: 4px;">
+          <span class="ag-section-label">4. Item Detail Expansion</span>
+          <div class="ag-slider-container" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span class="ag-slider-title">Enable Detail Expansion Steps</span>
+              <label class="switch">
+                <input type="checkbox" id="ag-details-toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div id="ag-details-controls" style="display: none; flex-direction: column; gap: 8px; margin-top: 4px;">
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <span class="ag-input-label">Modal Selector (Optional)</span>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <input type="text" id="ag-modal-selector" placeholder="e.g. .modal-content, .dialog" class="ag-input" style="flex: 1; height: 28px;">
+                  <button id="ag-pick-modal-btn" class="ag-btn ag-btn-secondary" style="font-size: 10px; padding: 0 8px; min-height: 24px; height: 28px; flex: 0.3;">Pick</button>
+                </div>
+              </div>
+              
+              <!-- Expand Steps Container -->
+              <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
+                <span class="ag-input-label" style="font-weight: 700; color: var(--color-brand-violet);">Expand Steps (Pre-Capture)</span>
+                <div id="ag-expand-steps-list" style="display: flex; flex-direction: column; gap: 4px;">
+                  <!-- Dynamically populated -->
+                </div>
+                <button id="ag-add-expand-step-btn" class="ag-btn ag-btn-secondary" style="font-size: 9px; padding: 2px 6px; min-height: 20px; height: 22px; width: 110px; margin-top: 2px;">
+                  + Add Expand Step
+                </button>
+              </div>
+
+              <!-- Close Steps Container -->
+              <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px; border-top: 1px dashed rgba(15, 118, 110, 0.15); padding-top: 6px;">
+                <span class="ag-input-label" style="font-weight: 700; color: var(--color-brand-violet);">Close Steps (Post-Capture)</span>
+                <div id="ag-close-steps-list" style="display: flex; flex-direction: column; gap: 4px;">
+                  <!-- Dynamically populated -->
+                </div>
+                <button id="ag-add-close-step-btn" class="ag-btn ag-btn-secondary" style="font-size: 9px; padding: 2px 6px; min-height: 20px; height: 22px; width: 100px; margin-top: 2px;">
+                  + Add Close Step
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- Pagination Settings -->
         <div class="ag-panel-section" style="border-top: 1px solid var(--color-border); padding-top: 12px; margin-top: 4px;">
-          <span class="ag-section-label">4. Pagination Settings</span>
+          <span class="ag-section-label">5. Pagination Settings</span>
           <div class="ag-slider-container" style="display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <span class="ag-slider-title">Enable Auto-Pagination</span>
@@ -1564,9 +2384,18 @@
           </div>
         </div>
 
+        <!-- Actions -->
+        <div class="ag-panel-section" style="border-top: 1px solid var(--color-border); padding-top: 12px; margin-top: 4px;">
+          <span class="ag-section-label">6. Scrape Actions</span>
+          <div class="ag-btn-group">
+            <button id="ag-codegen-btn" class="ag-btn ag-btn-primary">Generate Parser</button>
+            <button id="ag-execute-btn" class="ag-btn ag-btn-secondary" disabled>Dry Run Execution</button>
+          </div>
+        </div>
+
         <!-- Terminal Logs -->
         <div class="ag-panel-section">
-          <span class="ag-section-label">5. System Execution Logs</span>
+          <span class="ag-section-label">7. System Execution Logs</span>
           <div id="ag-terminal-logs" class="ag-terminal ag-scrollbar">
             <p class="ag-log-system">[system] Visual capture ready. Awaiting bounding box selection.</p>
           </div>
@@ -1574,7 +2403,7 @@
 
         <!-- Generated Code Viewport -->
         <div class="ag-panel-section">
-          <span class="ag-section-label">6. Generated Parser Code</span>
+          <span class="ag-section-label">8. Generated Parser Code</span>
           <div class="ag-code-container ag-scrollbar">
             <button id="ag-copy-code-btn" class="ag-copy-btn">Copy</button>
             <pre id="ag-code-view" class="ag-code-block"># Standby. Awaiting code generation...</pre>
@@ -1583,7 +2412,7 @@
 
         <!-- Extracted Records -->
         <div class="ag-panel-section">
-          <span class="ag-section-label">7. Extracted Catalog Items</span>
+          <span class="ag-section-label">9. Extracted Catalog Items</span>
           <div id="ag-records-view" class="ag-records-container ag-scrollbar">
             <p style="color: #64748b; font-size: 10px; margin: 0; font-style: italic;">No records extracted yet.</p>
           </div>
@@ -1668,23 +2497,131 @@
           });
         }
       });
+    // Detail Triggering Listeners
+    document
+      .getElementById("ag-details-toggle")
+      .addEventListener("change", (e) => {
+        detailStepsEnabled = e.target.checked;
+        document.getElementById("ag-details-controls").style.display =
+          detailStepsEnabled ? "flex" : "none";
+        if (detailStepsEnabled && expandSteps.length === 0 && closeSteps.length === 0) {
+          // Add default relative click step
+          expandSteps.push({ type: "click_relative", target: "" });
+        }
+        renderDetailSteps();
+      });
+
+    document
+      .getElementById("ag-modal-selector")
+      .addEventListener("input", (e) => {
+        modalSelector = e.target.value;
+      });
+
+    document
+      .getElementById("ag-pick-modal-btn")
+      .addEventListener("click", () => {
+        startPickingForModal();
+      });
+
+    document
+      .getElementById("ag-add-expand-step-btn")
+      .addEventListener("click", () => {
+        expandSteps.push({ type: "click_relative", target: "" });
+        renderDetailSteps();
+      });
+
+    document
+      .getElementById("ag-add-close-step-btn")
+      .addEventListener("click", () => {
+        closeSteps.push({ type: "click_absolute", target: "" });
+        renderDetailSteps();
+      });
+
+    renderDetailSteps();
     updateCodegenButtonState();
   }
 
   // Check and resume any active pagination session
   checkAndResumePagination();
 
-  // Message listener from popup controls
+  function checkAndResumeRecording() {
+    if (isContextValid() && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(["ag_recording_state", "ag_extraction_mode"], (result) => {
+        if (result && result.ag_extraction_mode) {
+          extractionMode = result.ag_extraction_mode;
+        }
+        if (result && result.ag_recording_state && result.ag_recording_state.active) {
+          const state = result.ag_recording_state;
+          isRecording = true;
+          recordingPhase = state.phase || "expand";
+          recordedExpandActions = state.expand_actions || [];
+          recordedCloseActions = state.close_actions || [];
+          lastActionTime = state.last_action_time || Date.now();
+          
+          showRecorderBar();
+          addPanelLog("Resumed active Advanced Mode recording session.", "info");
+
+          // Sync with popup if it is open
+          if (isContextValid()) {
+            try {
+              chrome.runtime.sendMessage({
+                action: "actionRecorded",
+                phase: recordingPhase,
+                count: getRecordingClickCount(),
+                elementTag: "resume"
+              });
+            } catch (err) {}
+          }
+        }
+      });
+    }
+  }
+
+  checkAndResumeRecording();
+
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "getStatus") {
-      sendResponse({ enabled: hoverEnabled });
+      sendResponse({
+        enabled: hoverEnabled,
+        recordingActive: isRecording,
+        phase: recordingPhase,
+        count: getRecordingClickCount(),
+        selectingTarget: isSelectingTargetAfterRecord
+      });
     } else if (message.action === "toggleHover") {
-      hoverEnabled = message.enabled;
-      if (!hoverEnabled) {
-        overlay.style.display = "none";
-        currentTarget = null;
-        closePanel();
+      extractionMode = message.mode || "simple";
+      if (extractionMode === "advanced") {
+        isRecording = message.enabled;
+        if (isRecording) {
+          recordedExpandActions = [];
+          recordedCloseActions = [];
+          recordingPhase = "expand";
+          lastActionTime = Date.now();
+          saveRecordingState();
+          showRecorderBar();
+          hoverEnabled = false;
+          overlay.style.display = "none";
+          addPanelLog("Advanced Mode: Action recording session started.", "info");
+        } else {
+          cancelRecordingSession();
+        }
+      } else {
+        isRecording = false;
+        removeRecorderBar();
+        hoverEnabled = message.enabled;
+        if (!hoverEnabled) {
+          overlay.style.display = "none";
+          currentTarget = null;
+          closePanel();
+        }
       }
+      sendResponse({ status: "ok" });
+    } else if (message.action === "toggleRecordingPhase") {
+      toggleRecordingPhase();
+      updateRecorderBarUI();
+      sendResponse({ phase: recordingPhase, count: getRecordingClickCount() });
+    } else if (message.action === "finalizeRecording") {
+      finalizeRecordingSession();
       sendResponse({ status: "ok" });
     } else if (message.action === "resetHighlight") {
       overlay.style.display = "none";
@@ -1700,11 +2637,18 @@
       generatedCode = message.code;
       inferredSelectors = message.selectors;
       
+      // Load saved detail steps if present
+      detailStepsEnabled = message.detail_steps_enabled || false;
+      expandSteps = message.expand_steps || [];
+      closeSteps = message.close_steps || [];
+      modalSelector = message.modal_selector || "";
+      
       document.getElementById("ag-code-view").textContent = generatedCode;
       document.getElementById("ag-execute-btn").disabled = false;
       
       addPanelLog("Loaded saved parser from history!", "success");
       updateCodegenButtonState();
+      renderDetailSteps();
       sendResponse({ status: "ok" });
     }
     return true; // Keep message channel open for async response

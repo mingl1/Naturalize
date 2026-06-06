@@ -653,3 +653,37 @@ input:checked + .slider:before {
   background: #ebe5d8;
   color: var(--color-brand-rose);
 }
+
+/* Extraction Mode Switch */
+.btn-mode {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--btn-bg, #f5f0e6);
+  border: var(--btn-border, 1px solid rgba(15, 118, 110, 0.15));
+  padding: 4px 10px;
+  border-radius: var(--border-radius-inner);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  box-shadow: var(--btn-shadow, 4px 4px 8px #e3dbcc, -4px -4px 8px #ffffff);
+  transition: all 0.2s ease;
+}
+
+.btn-mode:hover {
+  color: var(--color-brand-violet);
+}
+
+.btn-mode.active {
+  color: var(--tab-active-color, var(--color-brand-violet));
+  border-color: var(--tab-active-border-color, rgba(15, 118, 110, 0.2));
+  box-shadow: var(--tab-active-shadow, inset 2px 2px 5px #e3dbcc, inset -2px -2px 5px #ffffff);
+}
+
+.ag-rec-pulse-dot {
+  animation: ag-rec-pulse 1.5s infinite;
+}
+
+@keyframes ag-rec-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(1.2); }
+}

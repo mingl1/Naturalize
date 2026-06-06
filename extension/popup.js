@@ -7,6 +7,47 @@ document.addEventListener("DOMContentLoaded", () => {
   const toggleHover = document.getElementById("toggle-hover");
   const btnReset = document.getElementById("reset-session");
   const consoleLogs = document.getElementById("console-logs");
+  
+  const btnSimple = document.getElementById("btn-mode-simple");
+  const btnAdvanced = document.getElementById("btn-mode-advanced");
+  const locatorLabel = document.getElementById("locator-label");
+  let currentMode = "simple";
+
+  function updateModeUI() {
+    if (currentMode === "simple") {
+      btnSimple.classList.add("active");
+      btnAdvanced.classList.remove("active");
+      locatorLabel.textContent = "Visual Element Locator";
+    } else {
+      btnSimple.classList.remove("active");
+      btnAdvanced.classList.add("active");
+      locatorLabel.textContent = "Advanced Action Recorder";
+    }
+  }
+
+  chrome.storage.local.get(["ag_extraction_mode"], (result) => {
+    if (result && result.ag_extraction_mode) {
+      currentMode = result.ag_extraction_mode;
+      updateModeUI();
+    }
+  });
+
+  btnSimple.addEventListener("click", () => {
+    if (currentMode === "simple") return;
+    currentMode = "simple";
+    updateModeUI();
+    chrome.storage.local.set({ ag_extraction_mode: "simple" });
+    addConsoleLog("Switched to Simple extraction mode.");
+  });
+
+  btnAdvanced.addEventListener("click", () => {
+    if (currentMode === "advanced") return;
+    currentMode = "advanced";
+    updateModeUI();
+    chrome.storage.local.set({ ag_extraction_mode: "advanced" });
+    addConsoleLog("Switched to Advanced extraction mode (Actions Recording).");
+  });
+
   // Log message helper
   function addConsoleLog(text, type = "info") {
     const p = document.createElement("p");
@@ -28,6 +69,36 @@ document.addEventListener("DOMContentLoaded", () => {
     consoleLogs.scrollTop = consoleLogs.scrollHeight;
   }
 
+  const btnTogglePhase = document.getElementById("btn-toggle-phase");
+  const btnFinalizeRec = document.getElementById("btn-finalize-rec");
+  const advancedDashboard = document.getElementById("advanced-dashboard");
+  const selectionNotice = document.getElementById("selection-notice");
+  const popupRecPhase = document.getElementById("popup-rec-phase");
+  const popupRecCount = document.getElementById("popup-rec-count");
+  let isSelectingAfterFinalize = false;
+
+  function updateDashboardUI(recordingActive, phase, clickCount) {
+    if (currentMode === "advanced" && recordingActive) {
+      advancedDashboard.style.display = "flex";
+      btnSimple.disabled = true;
+      btnAdvanced.disabled = true;
+      popupRecPhase.textContent = phase === "expand" ? "Expand Steps" : "Close Steps";
+      popupRecPhase.style.color = phase === "expand" ? "#c2410c" : "#be123c";
+      btnTogglePhase.textContent = phase === "expand" ? "Switch to Close" : "Switch to Expand";
+      popupRecCount.textContent = clickCount || 0;
+      selectionNotice.style.display = "none";
+    } else {
+      advancedDashboard.style.display = "none";
+      btnSimple.disabled = false;
+      btnAdvanced.disabled = false;
+      if (isSelectingAfterFinalize) {
+        selectionNotice.style.display = "block";
+      } else {
+        selectionNotice.style.display = "none";
+      }
+    }
+  }
+
   // Load initial hover state from the active tab's content script
 
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -39,8 +110,10 @@ document.addEventListener("DOMContentLoaded", () => {
           toggleHover.checked = false;
           addConsoleLog("Hover tracker initialized to: OFF");
         } else {
-          toggleHover.checked = response.enabled;
-          addConsoleLog(`Hover tracker initialized to: ${response.enabled ? "ON" : "OFF"}`);
+          toggleHover.checked = response.enabled || response.recordingActive;
+          isSelectingAfterFinalize = response.selectingTarget || false;
+          updateDashboardUI(response.recordingActive, response.phase, response.count);
+          addConsoleLog(`Hover tracker initialized to: ${toggleHover.checked ? "ON" : "OFF"}`);
         }
       });
     } else {
@@ -52,16 +125,22 @@ document.addEventListener("DOMContentLoaded", () => {
   // Handle toggle switch changes
   toggleHover.addEventListener("change", (e) => {
     const isEnabled = e.target.checked;
+    isSelectingAfterFinalize = false;
     
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const activeTab = tabs[0];
       if (activeTab && activeTab.id) {
-        chrome.tabs.sendMessage(activeTab.id, { action: "toggleHover", enabled: isEnabled }, (response) => {
+        chrome.tabs.sendMessage(activeTab.id, { action: "toggleHover", enabled: isEnabled, mode: currentMode }, (response) => {
           if (chrome.runtime.lastError) {
             addConsoleLog("Could not send enable command to active tab.", "error");
             toggleHover.checked = !isEnabled; // Revert change
           } else {
             addConsoleLog(`Hover tracking toggled ${isEnabled ? "ON" : "OFF"}`, isEnabled ? "success" : "info");
+            if (currentMode === "advanced") {
+              updateDashboardUI(isEnabled, "expand", 0);
+            } else {
+              updateDashboardUI(false, "expand", 0);
+            }
           }
         });
       } else {
@@ -71,9 +150,41 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  // Toggle phase in Advanced mode
+  btnTogglePhase.addEventListener("click", () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const activeTab = tabs[0];
+      if (activeTab && activeTab.id) {
+        chrome.tabs.sendMessage(activeTab.id, { action: "toggleRecordingPhase" }, (response) => {
+          if (response && response.phase !== undefined) {
+            updateDashboardUI(true, response.phase, response.count);
+            addConsoleLog(`Switched recording phase to: ${response.phase === "expand" ? "Expand Steps" : "Close Steps"}`);
+          }
+        });
+      }
+    });
+  });
+
+  // Finalize recording session in Advanced mode
+  btnFinalizeRec.addEventListener("click", () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const activeTab = tabs[0];
+      if (activeTab && activeTab.id) {
+        chrome.tabs.sendMessage(activeTab.id, { action: "finalizeRecording" }, (response) => {
+          isSelectingAfterFinalize = true;
+          updateDashboardUI(false, "expand", 0);
+          addConsoleLog("Recording finalized. Click on the webpage element you wish to scope.", "success");
+        });
+      }
+    });
+  });
+
   // Handle reset button clicks
   btnReset.addEventListener("click", () => {
     addConsoleLog("Refreshing extension highlight states...", "info");
+    isSelectingAfterFinalize = false;
+    updateDashboardUI(false, "expand", 0);
+    toggleHover.checked = false;
     
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0] && tabs[0].id) {
@@ -92,6 +203,25 @@ document.addEventListener("DOMContentLoaded", () => {
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "logUpdate") {
       addConsoleLog(message.text, message.type || "info");
+      sendResponse({ status: "ok" });
+    } else if (message.action === "actionRecorded") {
+      toggleHover.checked = true;
+      updateDashboardUI(true, message.phase, message.count);
+      if (message.elementTag !== "resume" && message.elementTag !== "phase-toggle") {
+        addConsoleLog(`[Recorded click] target: <${message.elementTag}>`, "success");
+      }
+      sendResponse({ status: "ok" });
+    } else if (message.action === "recordingFinalized") {
+      isSelectingAfterFinalize = true;
+      toggleHover.checked = false;
+      updateDashboardUI(false, "expand", 0);
+      addConsoleLog("Recording finalized. Click on the webpage element you wish to scope.", "success");
+      sendResponse({ status: "ok" });
+    } else if (message.action === "scopingFinalized") {
+      isSelectingAfterFinalize = false;
+      toggleHover.checked = false;
+      updateDashboardUI(false, "expand", 0);
+      addConsoleLog("Scoping complete! Control panel opened on webpage.", "success");
       sendResponse({ status: "ok" });
     }
   });
@@ -228,7 +358,11 @@ document.addEventListener("DOMContentLoaded", () => {
           {
             action: "loadSavedParser",
             code: parser.code,
-            selectors: parser.selectors
+            selectors: parser.selectors,
+            detail_steps_enabled: parser.detail_steps_enabled,
+            expand_steps: parser.expand_steps,
+            close_steps: parser.close_steps,
+            modal_selector: parser.modal_selector
           },
           (response) => {
             if (chrome.runtime.lastError) {
