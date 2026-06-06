@@ -33,6 +33,13 @@ def test_api():
     payload_gen = {
         "html_snippet": html_snippet,
         "context_url": "https://example.com/store",
+        "user_context": "Extract rating and reviews as custom metadata fields.",
+        "webpage_context": {
+            "url": "https://example.com/store",
+            "title": "Futuristic Electronics Emporium",
+            "description": "Buy mechanical keyboards and RGB gaming mice.",
+            "keywords": "keyboards, gaming, mouse",
+        },
     }
     r_gen = requests.post(f"{base_url}/api/generate-parser", json=payload_gen)
     assert r_gen.status_code == 200
@@ -44,6 +51,20 @@ def test_api():
     print("Generated code preview:")
     print("\n".join(generated_code.splitlines()[:15]))
     print("...")
+
+    # If heuristics/mock mode is active, check if comments are present
+    if (
+        "Generated BeautifulSoup Parser conforming to sdk_blueprint.py"
+        in generated_code
+    ):
+        assert (
+            "# User Context/Guidelines: Extract rating and reviews as custom metadata fields."
+            in generated_code
+        )
+        assert "# Webpage Context: " in generated_code
+        print(
+            "Heuristics verification: user_context and webpage_context comments found in generated code!"
+        )
 
     # 3. Test execute-parser
     print("\nTesting /api/execute-parser...")

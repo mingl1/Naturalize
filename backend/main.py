@@ -53,7 +53,10 @@ def generate_parser(request: SnippetGenerationRequest):
         )
 
     success, code, selectors, message = generate_parser_code(
-        html_snippet=request.html_snippet, context_url=request.context_url
+        html_snippet=request.html_snippet,
+        context_url=request.context_url,
+        user_context=request.user_context,
+        webpage_context=request.webpage_context,
     )
 
     return SnippetGenerationResponse(
@@ -96,7 +99,11 @@ def execute_parser(request: ExecutionRequest):
                 )
 
             # Run extraction
-            html_inputs = request.full_htmls if request.full_htmls is not None else [request.full_html or ""]
+            html_inputs = (
+                request.full_htmls
+                if request.full_htmls is not None
+                else [request.full_html or ""]
+            )
             extracted_items = []
             for _idx, html_content in enumerate(html_inputs):
                 page_items = extract_items_func(html_content)
@@ -107,17 +114,22 @@ def execute_parser(request: ExecutionRequest):
             if sdk_class:
                 sdk_instance = sdk_class()
                 import inspect
+
                 try:
                     sig = inspect.signature(sdk_instance.bulk_upsert)
                     params = sig.parameters
-                    
+
                     kwargs = {}
                     # Match collection_name or collection
                     if "collection_name" in params:
-                        kwargs["collection_name"] = request.collection_name or "catalog_items"
+                        kwargs["collection_name"] = (
+                            request.collection_name or "catalog_items"
+                        )
                     elif "collection" in params:
-                        kwargs["collection"] = request.collection_name or "catalog_items"
-                    
+                        kwargs["collection"] = (
+                            request.collection_name or "catalog_items"
+                        )
+
                     # Match data, items, or catalog_items
                     if "data" in params:
                         kwargs["data"] = extracted_items
@@ -125,13 +137,13 @@ def execute_parser(request: ExecutionRequest):
                         kwargs["items"] = extracted_items
                     elif "catalog_items" in params:
                         kwargs["catalog_items"] = extracted_items
-                    
+
                     # Match unique_key or key
                     if "unique_key" in params:
                         kwargs["unique_key"] = request.unique_key or "title"
                     elif "key" in params:
                         kwargs["key"] = request.unique_key or "title"
-                    
+
                     if kwargs:
                         sdk_instance.bulk_upsert(**kwargs)
                     else:
@@ -139,19 +151,21 @@ def execute_parser(request: ExecutionRequest):
                         sdk_instance.bulk_upsert(
                             request.collection_name or "catalog_items",
                             extracted_items,
-                            request.unique_key or "title"
+                            request.unique_key or "title",
                         )
-                except Exception as sdk_err:
+                except Exception:
                     # Fallback to positional calls if signature inspection fails
                     try:
                         sdk_instance.bulk_upsert(
                             request.collection_name or "catalog_items",
                             extracted_items,
-                            request.unique_key or "title"
+                            request.unique_key or "title",
                         )
                     except TypeError:
                         try:
-                            sdk_instance.bulk_upsert(extracted_items, request.unique_key or "title")
+                            sdk_instance.bulk_upsert(
+                                extracted_items, request.unique_key or "title"
+                            )
                         except TypeError:
                             sdk_instance.bulk_upsert(extracted_items)
 

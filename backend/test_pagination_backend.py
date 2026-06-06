@@ -1,5 +1,7 @@
 import sys
+
 import requests
+
 
 def test_pagination_api():
     base_url = "http://127.0.0.1:8000"
@@ -71,10 +73,12 @@ def test_pagination_api():
     assert "Item 3 Page 2" in titles
     print("[SUCCESS] Backend pagination execution test passed!")
 
+
 if __name__ == "__main__":
     try:
         test_pagination_api()
-    except Exception as e:
+    except Exception:
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

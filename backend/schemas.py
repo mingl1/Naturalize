@@ -10,6 +10,14 @@ class SnippetGenerationRequest(BaseModel):
     context_url: Optional[str] = Field(
         default=None, description="The URL of the source page for metadata context"
     )
+    user_context: Optional[str] = Field(
+        default=None,
+        description="Optional natural language instructions, guidelines, or queries from the user describing target fields",
+    )
+    webpage_context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional metadata about the webpage (e.g. title, description, keywords, url)",
+    )
 
 
 class SnippetGenerationResponse(BaseModel):
@@ -19,7 +27,7 @@ class SnippetGenerationResponse(BaseModel):
     generated_code: str = Field(
         description="The generated BeautifulSoup Python parsing code"
     )
-    selectors: Dict[str, str] = Field(
+    selectors: Dict[str, Any] = Field(
         default_factory=dict, description="Inferred CSS selectors for the data items"
     )
     message: str = Field(description="Status message or error logs")
@@ -28,10 +36,12 @@ class SnippetGenerationResponse(BaseModel):
 class ExecutionRequest(BaseModel):
     generated_code: str = Field(description="The Python code block to execute")
     full_html: Optional[str] = Field(
-        default=None, description="The full page HTML document to run the parser against"
+        default=None,
+        description="The full page HTML document to run the parser against",
     )
     full_htmls: Optional[List[str]] = Field(
-        default=None, description="A list of full page HTML documents to run the parser against"
+        default=None,
+        description="A list of full page HTML documents to run the parser against",
     )
     collection_name: Optional[str] = Field(
         default="catalog_items", description="Target database collection name"
