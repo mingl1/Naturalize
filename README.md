@@ -66,13 +66,22 @@ The backend API will be available at `http://127.0.0.1:8000`.
 
 ---
 
-### 2. Chrome Extension Installation
+### 2. Browser Extension Installation
 
-1. Open a Chromium-based browser (Chrome, Edge, Brave).
-2. Navigate to `chrome://extensions/`.
-3. Enable **Developer mode** (toggle in the top-right corner).
-4. Click **Load unpacked** in the top-left.
-5. Select the `/extension` directory from this repository.
+### Google Chrome & Chromium-based Browsers (Chrome, Edge, Brave, etc.)
+
+1. Open your browser and navigate to `chrome://extensions/`.
+2. Enable **Developer mode** (toggle in the top-right corner).
+3. Click **Load unpacked** in the top-left.
+4. Select the `/extension` directory from this repository.
+
+### Mozilla Firefox
+
+1. Open Firefox and navigate to `about:debugging`.
+2. Click **This Firefox** on the left menu.
+3. Click **Load Temporary Add-on...**
+4. Select the `manifest.json` (or `manifest.firefox.json`) file inside the `/extension` directory of this repository.
+5. The extension will remain active until you restart Firefox.
 
 ---
 

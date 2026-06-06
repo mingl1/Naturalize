@@ -1,7 +1,7 @@
 # MISSION SPECIFICATION: Browser Extension & Scrape-as-Code Engine
 
 ## 1. System Identity & Constraints
-- **Target Architecture:** Chrome Extension (Manifest V3 Front-End) paired with a FastAPI/Python backend execution environment.
+- **Target Architecture:** Cross-Browser Extension (Chrome & Firefox Manifest V3 Front-End) paired with a FastAPI/Python backend execution environment.
 - **Agent Autonomy Policy:** `Agent Decides` for file modifications; `Request Review` for any outbound third-party web service requests or execution of raw Javascript blocks inside the browser tool wrapper.
 - **Allowed Tech Stack:** Native Browser APIs, TailwindCSS via CDN (for extension popup styling), Python 3.11+, BeautifulSoup4, Parsel, and PyDantic V2.
 
@@ -37,5 +37,5 @@ class AgenticCatalogSDK:
 Before writing any complex backend generation patterns, execute the following implementation step:
 
 1. Scaffold an empty project repository containing a valid, detectable open-source license file (MIT) visible in the root workspace.
-2. Build a functioning Chrome Extension boilerplate folder (`/extension`) containing a verified `manifest.json` (V3) and an active `content.js` script capable of intercepting mouse hovers on a page.
+2. Build a functioning Cross-Browser Extension boilerplate folder (`/extension`) containing a verified, unified `manifest.json` (V3 compatible with both Chrome and Firefox) and an active `content.js` script capable of intercepting mouse hovers on a page.
 3. Present your generated Implementation Plan and Code Diffs for my review before triggering a local test compilation loop.
