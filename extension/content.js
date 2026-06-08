@@ -49,6 +49,14 @@
     if (!isContextValid()) {
       throw new Error("Extension context is invalid. Please reload the page.");
     }
+
+    // Retrieve token from local storage
+    const token = await new Promise((resolveToken) => {
+      chrome.storage.local.get(["ag_extension_token"], (res) => {
+        resolveToken(res?.ag_extension_token || "");
+      });
+    });
+
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage(
         {
@@ -57,6 +65,7 @@
           method,
           headers: {
             "Content-Type": "application/json",
+            "Authorization": token ? `Bearer ${token}` : "",
           },
           body,
         },

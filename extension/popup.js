@@ -229,23 +229,65 @@ document.addEventListener("DOMContentLoaded", () => {
   // Tabs switching logic
   const tabLocator = document.getElementById("tab-locator");
   const tabHistory = document.getElementById("tab-history");
+  const tabSettings = document.getElementById("tab-settings");
   const locatorContent = document.getElementById("locator-content");
   const historyContent = document.getElementById("history-content");
+  const settingsContent = document.getElementById("settings-content");
   const historyList = document.getElementById("history-list");
 
   tabLocator.addEventListener("click", () => {
     tabLocator.classList.add("active");
     tabHistory.classList.remove("active");
+    tabSettings.classList.remove("active");
     locatorContent.style.display = "block";
     historyContent.style.display = "none";
+    settingsContent.style.display = "none";
   });
 
   tabHistory.addEventListener("click", () => {
     tabHistory.classList.add("active");
     tabLocator.classList.remove("active");
+    tabSettings.classList.remove("active");
     locatorContent.style.display = "none";
     historyContent.style.display = "block";
+    settingsContent.style.display = "none";
     renderHistory();
+  });
+
+  tabSettings.addEventListener("click", () => {
+    tabSettings.classList.add("active");
+    tabLocator.classList.remove("active");
+    tabHistory.classList.remove("active");
+    locatorContent.style.display = "none";
+    historyContent.style.display = "none";
+    settingsContent.style.display = "block";
+    loadExtensionToken();
+  });
+
+  // Token storage logic
+  const tokenInput = document.getElementById("extension-token-input");
+  const btnSaveToken = document.getElementById("btn-save-token");
+
+  function loadExtensionToken() {
+    chrome.storage.local.get(["ag_extension_token"], (result) => {
+      if (result && result.ag_extension_token) {
+        tokenInput.value = result.ag_extension_token;
+      }
+    });
+  }
+
+  // Load initially
+  loadExtensionToken();
+
+  btnSaveToken.addEventListener("click", () => {
+    const token = tokenInput.value.trim();
+    chrome.storage.local.set({ ag_extension_token: token }, () => {
+      addConsoleLog("Extension Access Token saved!", "success");
+      btnSaveToken.textContent = "Saved!";
+      setTimeout(() => {
+        btnSaveToken.textContent = "Save Token";
+      }, 1500);
+    });
   });
 
   function renderHistory() {
