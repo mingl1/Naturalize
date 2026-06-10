@@ -18,6 +18,10 @@ class SnippetGenerationRequest(BaseModel):
         default=None,
         description="Optional metadata about the webpage (e.g. title, description, keywords, url)",
     )
+    full_htmls: Optional[List[str]] = Field(
+        default=None,
+        description="Optional full page HTMLs to run dry-run validation tests against",
+    )
 
 
 class SnippetGenerationResponse(BaseModel):
@@ -63,3 +67,27 @@ class ExecutionResponse(BaseModel):
         description="Extracted records conforming to ExtractedCatalogItem",
     )
     logs: str = Field(description="Standard execution logs and script printouts")
+
+
+class FilterInput(BaseModel):
+    field: str = Field(description="Document field to filter")
+    operator: str = Field(
+        description="Comparison operator (less_than, greater_than, equals, regex)"
+    )
+    value: Any = Field(description="Value to compare against")
+
+
+class QueryCatalogRequest(BaseModel):
+    conversation_id: str = Field(description="Unique conversation thread identifier")
+    user_prompt: str = Field(description="The natural language user query")
+    user_id: Optional[str] = Field(
+        default="user_default", description="User identifier"
+    )
+
+
+class InstantSearchRequest(BaseModel):
+    conversation_id: str = Field(description="Unique conversation thread identifier")
+    search_id: str = Field(
+        description="The unique ID of the search widget being updated"
+    )
+    updated_filters: List[FilterInput] = Field(description="List of new filter values")
