@@ -152,7 +152,7 @@ def search_items(payload: SearchRequest, current_user: dict = Depends(get_curren
 
 # --- Generator & Execution Endpoints (Updated) ---
 @app.post("/api/generate-parser", response_model=SnippetGenerationResponse)
-def generate_parser(request: SnippetGenerationRequest, authorization: Optional[str] = Header(None)):
+async def generate_parser(request: SnippetGenerationRequest, authorization: Optional[str] = Header(None)):
     """
     Accepts an atomic HTML container snippet and generates a BeautifulSoup parser
     bound to the ExtractedCatalogItem blueprint schema.

@@ -11,25 +11,35 @@ import contextvars
 # Context variable to hold user ID during request execution
 current_user_id = contextvars.ContextVar("current_user_id", default=None)
 
-# Initialize MongoDB Client
-MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
+# Initialize MongoDB Client lazily to prevent connection errors during import or unit tests.
+_client = None
+_db = None
 
-try:
-    import certifi
-    ca = certifi.where()
-    if "mongodb.net" in MONGODB_URI or "mongodb+srv" in MONGODB_URI:
-        client = MongoClient(MONGODB_URI, tlsCAFile=ca)
-    else:
-        client = MongoClient(MONGODB_URI)
-except ImportError:
-    client = MongoClient(MONGODB_URI)
-
-db = client.get_database("naturalize")
-
-# Ensure indexes
-db.users.create_index("username", unique=True)
-db.users.create_index("token", unique=True)
-db.items.create_index([("user_id", 1), ("collection_name", 1), ("title", 1)])
+def _get_db():
+    global _client, _db
+    if _db is None:
+        MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb://localhost:27017")
+        try:
+            import certifi
+            ca = certifi.where()
+            if "mongodb.net" in MONGODB_URI or "mongodb+srv" in MONGODB_URI:
+                _client = MongoClient(MONGODB_URI, tlsCAFile=ca)
+            else:
+                _client = MongoClient(MONGODB_URI)
+        except ImportError:
+            _client = MongoClient(MONGODB_URI)
+        
+        _db = _client.get_database("naturalize")
+        
+        # Ensure indexes
+        try:
+            _db.users.create_index("username", unique=True)
+            _db.users.create_index("token", unique=True)
+            _db.items.create_index([("user_id", 1), ("collection_name", 1), ("title", 1)])
+        except Exception as e:
+            print(f"[Warning] Failed to ensure MongoDB indexes: {e}")
+            
+    return _db
 
 # Password hashing using pbkdf2
 def hash_password(password: str) -> str:
@@ -47,6 +57,7 @@ def verify_password(password: str, hashed: str) -> bool:
 
 # User Auth Helpers
 def register_user(username: str, password: str) -> dict:
+    db = _get_db()
     if db.users.find_one({"username": username}):
         return {"success": False, "message": "Username already exists."}
     
@@ -70,6 +81,7 @@ def register_user(username: str, password: str) -> dict:
     }
 
 def login_user(username: str, password: str) -> dict:
+    db = _get_db()
     user = db.users.find_one({"username": username})
     if not user or not verify_password(password, user["password_hash"]):
         return {"success": False, "message": "Invalid username or password."}
@@ -82,9 +94,11 @@ def login_user(username: str, password: str) -> dict:
     }
 
 def get_user_by_token(token: str) -> dict:
+    db = _get_db()
     return db.users.find_one({"token": token})
 
 def update_user_gemini_key(user_id: str, gemini_api_key: str) -> bool:
+    db = _get_db()
     res = db.users.update_one(
         {"_id": ObjectId(user_id)},
         {"$set": {"gemini_api_key": gemini_api_key}}
@@ -96,6 +110,7 @@ def save_items_to_db(user_id: str, collection_name: str, items: list, unique_key
     """
     Upserts a list of parsed items under a specific user and collection name.
     """
+    db = _get_db()
     saved_count = 0
     for item in items:
         # Standardize properties
@@ -151,6 +166,7 @@ def get_collections_list(user_id: str) -> list:
     """
     Returns distinct collection names for the user.
     """
+    db = _get_db()
     u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
     collections = db.items.distinct("collection_name", {"user_id": u_id})
     return sorted(collections)
@@ -159,6 +175,7 @@ def get_collection_items_list(user_id: str, collection_name: str) -> list:
     """
     Returns items in a specific collection.
     """
+    db = _get_db()
     u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
     cursor = db.items.find({"user_id": u_id, "collection_name": collection_name})
     results = []
