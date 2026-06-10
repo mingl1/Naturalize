@@ -61,6 +61,9 @@ class UserAuthRequest(BaseModel):
 
 class UserSettingsRequest(BaseModel):
     gemini_api_key: str = Field(default="")
+    generator_model: str = Field(default="gemini-3.5-flash")
+    validator_model: str = Field(default="gemini-3.5-flash")
+    search_model: str = Field(default="gemini-3.5-flash")
 
 class SearchRequest(BaseModel):
     q: str = Field(...)
@@ -105,13 +108,111 @@ def auth_me(current_user: dict = Depends(get_current_user)):
         "user_id": str(current_user["_id"]),
         "username": current_user["username"],
         "token": current_user["token"],
-        "gemini_api_key": current_user.get("gemini_api_key", "")
+        "gemini_api_key": current_user.get("gemini_api_key", ""),
+        "generator_model": current_user.get("generator_model", "gemini-3.5-flash"),
+        "validator_model": current_user.get("validator_model", "gemini-3.5-flash"),
+        "search_model": current_user.get("search_model", "gemini-3.5-flash")
     }
 
 @app.post("/api/user/settings")
 def update_settings(payload: UserSettingsRequest, current_user: dict = Depends(get_current_user)):
-    success = database.update_user_gemini_key(str(current_user["_id"]), payload.gemini_api_key)
+    success = database.update_user_settings(
+        str(current_user["_id"]),
+        payload.gemini_api_key,
+        payload.generator_model,
+        payload.validator_model,
+        payload.search_model
+    )
     return {"success": success, "message": "Settings updated successfully."}
+
+@app.get("/api/models")
+def list_models(authorization: Optional[str] = Header(None)):
+    user = None
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ")[1]
+        user = database.get_user_by_token(token)
+    
+    gemini_key = None
+    if user:
+        gemini_key = user.get("gemini_api_key")
+    if not gemini_key:
+        gemini_key = os.environ.get("GEMINI_API_KEY")
+        
+    fallback_models = [
+        {"id": "gemini-3.5-flash", "name": "Gemini 3.5 Flash", "input_price_1m": 1.50, "output_price_1m": 9.00},
+        {"id": "gemini-3.1-pro", "name": "Gemini 3.1 Pro", "input_price_1m": 2.00, "output_price_1m": 12.00},
+        {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "input_price_1m": 0.30, "output_price_1m": 2.50},
+        {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "input_price_1m": 1.25, "output_price_1m": 10.00},
+        {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash", "input_price_1m": 0.075, "output_price_1m": 0.30},
+        {"id": "gemini-2.0-flash-lite", "name": "Gemini 2.0 Flash Lite", "input_price_1m": 0.075, "output_price_1m": 0.30},
+        {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash", "input_price_1m": 0.075, "output_price_1m": 0.30},
+        {"id": "gemini-1.5-pro", "name": "Gemini 1.5 Pro", "input_price_1m": 1.25, "output_price_1m": 5.00},
+    ]
+    
+    if not gemini_key:
+        return {"models": fallback_models}
+        
+    try:
+        from google import genai
+        client = genai.Client(api_key=gemini_key)
+        api_models = client.models.list()
+        
+        exclude_keywords = [
+            "embedding", "translate", "image", "audio", "vision", "tts", 
+            "robotics", "computer-use", "customtools", "live", "preview-tts"
+        ]
+        
+        filtered = []
+        seen_ids = set()
+        
+        pricing_map = {m["id"]: (m["name"], m["input_price_1m"], m["output_price_1m"]) for m in fallback_models}
+        
+        for m in api_models:
+            name_lower = m.name.lower()
+            if "gemini" in name_lower and not any(k in name_lower for k in exclude_keywords):
+                model_id = m.name.split("/")[-1]
+                if model_id in seen_ids:
+                    continue
+                seen_ids.add(model_id)
+                
+                if model_id in pricing_map:
+                    friendly_name, in_p, out_p = pricing_map[model_id]
+                else:
+                    parts = model_id.split("-")
+                    formatted_parts = []
+                    for p in parts:
+                        if p == "gemini":
+                            formatted_parts.append("Gemini")
+                        elif p.replace(".", "").isdigit():
+                            formatted_parts.append(p)
+                        else:
+                            formatted_parts.append(p.capitalize())
+                    friendly_name = " ".join(formatted_parts)
+                    
+                    if "pro" in model_id:
+                        in_p, out_p = 1.25, 10.00
+                    else:
+                        in_p, out_p = 0.30, 2.50
+                        
+                filtered.append({
+                    "id": model_id,
+                    "name": friendly_name,
+                    "input_price_1m": in_p,
+                    "output_price_1m": out_p
+                })
+        
+        def sort_key(x):
+            try:
+                standard_ids = [m["id"] for m in fallback_models]
+                return (standard_ids.index(x["id"]), x["id"])
+            except ValueError:
+                return (len(fallback_models), x["id"])
+                
+        filtered.sort(key=sort_key)
+        return {"models": filtered}
+    except Exception as e:
+        print(f"[Warning] Failed to fetch dynamic models list: {e}")
+        return {"models": fallback_models}
 
 # --- Collections & Items Endpoints ---
 @app.get("/api/collections")
@@ -127,9 +228,10 @@ def get_collection_items(
 ):
     user_id = str(current_user["_id"])
     gemini_key = current_user.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
+    search_model = current_user.get("search_model") or "gemini-3.5-flash"
     
     if q and q.strip():
-        items = database.search_collection_items_list(user_id, collection_name, q, gemini_key)
+        items = database.search_collection_items_list(user_id, collection_name, q, gemini_key, search_model)
     else:
         items = database.get_collection_items_list(user_id, collection_name)
     return {"items": items}
@@ -138,15 +240,16 @@ def get_collection_items(
 def search_items(payload: SearchRequest, current_user: dict = Depends(get_current_user)):
     user_id = str(current_user["_id"])
     gemini_key = current_user.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
+    search_model = current_user.get("search_model") or "gemini-3.5-flash"
     
     if payload.collection_name:
-        items = database.search_collection_items_list(user_id, payload.collection_name, payload.q, gemini_key)
+        items = database.search_collection_items_list(user_id, payload.collection_name, payload.q, gemini_key, search_model)
     else:
         # Search across all collections and combine results
         collections = database.get_collections_list(user_id)
         items = []
         for col in collections:
-            col_items = database.search_collection_items_list(user_id, col, payload.q, gemini_key)
+            col_items = database.search_collection_items_list(user_id, col, payload.q, gemini_key, search_model)
             items.extend(col_items)
     return {"items": items}
 
@@ -163,8 +266,12 @@ async def generate_parser(request: SnippetGenerationRequest, authorization: Opti
         token = authorization.split(" ")[1]
         user = database.get_user_by_token(token)
     gemini_key = None
+    generator_model = "gemini-3.5-flash"
+    validator_model = "gemini-3.5-flash"
     if user:
         gemini_key = user.get("gemini_api_key")
+        generator_model = user.get("generator_model") or "gemini-3.5-flash"
+        validator_model = user.get("validator_model") or "gemini-3.5-flash"
         
     if not gemini_key:
         gemini_key = os.environ.get("GEMINI_API_KEY")
@@ -196,6 +303,8 @@ async def generate_parser(request: SnippetGenerationRequest, authorization: Opti
             "error_feedback": None,
             "context_url": request.context_url or "",
             "webpage_context": request.webpage_context or {},
+            "generator_model": generator_model,
+            "validator_model": validator_model,
         }
         session = await generator_runner.session_service.create_session(
             app_name=generator_runner.app_name,
@@ -449,10 +558,21 @@ async def query_catalog(request: QueryCatalogRequest):
     Exposes conversational natural language search over MongoDB catalog documents.
     Uses sequential agents to discover schema and perform vector search.
     """
+    search_model = "gemini-3.5-flash"
+    if request.user_id and request.user_id != "user_default":
+        try:
+            from bson import ObjectId
+            user_doc = database._get_db().users.find_one({"_id": ObjectId(request.user_id)})
+            if user_doc:
+                search_model = user_doc.get("search_model") or "gemini-3.5-flash"
+        except Exception:
+            pass
+
     session = await search_runner.session_service.create_session(
         app_name=search_runner.app_name,
         user_id=request.user_id,
         session_id=request.conversation_id,
+        state={"gemini_model": search_model}
     )
 
     try:

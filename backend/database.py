@@ -106,6 +106,26 @@ def update_user_gemini_key(user_id: str, gemini_api_key: str) -> bool:
     )
     return res.modified_count > 0
 
+def update_user_settings(
+    user_id: str,
+    gemini_api_key: str,
+    generator_model: str = "gemini-3.5-flash",
+    validator_model: str = "gemini-3.5-flash",
+    search_model: str = "gemini-3.5-flash"
+) -> bool:
+    db = _get_db()
+    res = db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$set": {
+            "gemini_api_key": gemini_api_key,
+            "generator_model": generator_model,
+            "validator_model": validator_model,
+            "search_model": search_model
+        }}
+    )
+    return res.modified_count > 0
+
+
 # Items & Collections logic
 def save_items_to_db(user_id: str, collection_name: str, items: list, unique_keys: Any = None, **kwargs):
     """
@@ -232,7 +252,7 @@ def get_collection_items_list(user_id: str, collection_name: str) -> list:
         results.append(doc)
     return results
 
-def search_collection_items_list(user_id: str, collection_name: str, query_str: str, gemini_key: str = None) -> list:
+def search_collection_items_list(user_id: str, collection_name: str, query_str: str, gemini_key: str = None, gemini_model: str = "gemini-3.5-flash") -> list:
     """
     Performs search on a collection. Uses Gemini semantic filter if gemini_key is available,
     otherwise falls back to keyword matching.
@@ -269,7 +289,7 @@ If no items match, return an empty array: [].
 Do NOT include any explanations, markdown code blocks, backticks, or text other than the raw JSON array.
 """
             response = client.models.generate_content(
-                model="gemini-3.5-flash",
+                model=gemini_model,
                 contents=prompt,
             )
             text_resp = response.text.strip()

@@ -1,5 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
 :root {
   /* Premium Natural/Neutral Palette */
   --bg-main: #181715;          /* Warm deep charcoal/basalt */
@@ -33,6 +37,28 @@
   --radius-md: 10px;
   --radius-lg: 16px;
   --transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  
+  /* shadcn/ui generic fallback mappings */
+  --background: var(--bg-main);
+  --foreground: var(--text-main);
+  --card: var(--bg-card);
+  --card-foreground: var(--text-main);
+  --popover: var(--bg-panel);
+  --popover-foreground: var(--text-main);
+  --primary: var(--color-sage);
+  --primary-foreground: var(--bg-main);
+  --secondary: var(--bg-panel);
+  --secondary-foreground: var(--text-main);
+  --muted: var(--bg-card);
+  --muted-foreground: var(--text-muted);
+  --accent: var(--color-sand);
+  --accent-foreground: var(--bg-main);
+  --destructive: var(--color-clay);
+  --destructive-foreground: var(--text-main);
+  --border: var(--border-light);
+  --input: var(--bg-input);
+  --ring: var(--border-focus);
+  --radius: var(--radius-md);
 }
 
 /* Global resets & base */

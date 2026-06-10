@@ -74,6 +74,7 @@ def generate_parser_code(
     context_url: str = None,
     user_context: str = None,
     webpage_context: Dict[str, Any] = None,
+    gemini_model: str = "gemini-3.5-flash",
 ) -> Tuple[bool, str, Dict[str, str], str]:
     """
     Tries to generate the parsing code using LLM (Gemini or OpenAI).
@@ -84,7 +85,7 @@ def generate_parser_code(
 
     if gemini_key:
         success, code, selectors, message = _generate_with_gemini(
-            gemini_key, html_snippet, context_url, user_context, webpage_context
+            gemini_key, html_snippet, context_url, user_context, webpage_context, gemini_model
         )
     elif openai_key:
         success, code, selectors, message = _generate_with_openai(
@@ -107,6 +108,7 @@ def _generate_with_gemini(
     context_url: str = None,
     user_context: str = None,
     webpage_context: Dict[str, Any] = None,
+    model: str = "gemini-3.5-flash",
 ) -> Tuple[bool, str, Dict[str, str], str]:
     try:
         client = genai.Client(api_key=api_key)
@@ -147,7 +149,7 @@ def _generate_with_gemini(
         prompt = "\n".join(prompt_parts)
 
         response = client.models.generate_content(
-            model="gemini-3.5-flash",
+            model=model,
             contents=prompt,
         )
         text = response.text

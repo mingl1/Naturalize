@@ -161,7 +161,8 @@ class ParserScriptValidator(BaseAgent):
                 )
 
             # 2. Evaluate instruction/schema coverage (LLM Judge)
-            judge_verdict = self._evaluate_results(user_context, extracted_items[0])
+            validator_model = state.get("validator_model") or "gemini-3.5-flash"
+            judge_verdict = self._evaluate_results(user_context, extracted_items[0], model=validator_model)
             if judge_verdict != "SUCCESS":
                 raise ValueError(
                     f"Instructions Compliance Audit Failed:\n{judge_verdict}"
@@ -183,7 +184,7 @@ class ParserScriptValidator(BaseAgent):
             # Feed error back into session state and continue LoopAgent
             yield Event(author=self.name, state={"error_feedback": error_msg})
 
-    def _evaluate_results(self, user_context: str, sample_item: dict) -> str:
+    def _evaluate_results(self, user_context: str, sample_item: dict, model: str = "gemini-3.5-flash") -> str:
         """Invokes Gemini to judge if the parsed item fields satisfy the user guidelines."""
         if not user_context:
             return "SUCCESS"
@@ -207,7 +208,7 @@ class ParserScriptValidator(BaseAgent):
             If any fields are missing or incorrectly parsed, output a short explanation of what is missing/wrong. Do not add any markdown formatting or extra text.
             """
             response = client.models.generate_content(
-                model="gemini-3.5-flash",
+                model=model,
                 contents=prompt,
             )
             return response.text.strip()
@@ -221,6 +222,12 @@ def developer_prompt_injector(
     callback_context: CallbackContext, llm_request: LlmRequest
 ) -> None:
     state = callback_context.state
+    
+    # Dynamically override the model with the user's custom choice if present
+    generator_model = state.get("generator_model")
+    if generator_model:
+        llm_request.model = generator_model
+
     html_snippet = state.get("html_snippet", "")
     user_context = state.get("user_context", "")
     error_feedback = state.get("error_feedback") or "None"
@@ -397,6 +404,17 @@ def cache_query_parts_callback(
     return response
 
 
+# Semantic Search agent prompt injector callback
+def doc_qa_prompt_injector(
+    callback_context: CallbackContext, llm_request: LlmRequest
+) -> None:
+    state = callback_context.state
+    # Dynamically override the model with the user's custom choice if present
+    gemini_model = state.get("gemini_model")
+    if gemini_model:
+        llm_request.model = gemini_model
+
+
 # Q&A Agent using the MongoDB MCP server
 doc_qa_agent = LlmAgent(
     name="doc_qa_agent",
@@ -417,6 +435,7 @@ doc_qa_agent = LlmAgent(
     """,
     tools=[mongodb_mcp],
     output_schema=SearchResultResponse,
+    before_model_callback=doc_qa_prompt_injector,
     after_agent_callback=cache_query_parts_callback,
 )
 
