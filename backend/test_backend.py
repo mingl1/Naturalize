@@ -10,7 +10,8 @@ client = TestClient(app)
 
 def test_api():
     with patch("database.get_user_by_token") as mock_get_user, \
-         patch("database.save_items_to_db") as mock_save:
+         patch("database.save_items_to_db") as mock_save, \
+         patch.dict("os.environ", {"GEMINI_API_KEY": ""}):
         
         mock_get_user.return_value = {
             "_id": ObjectId("60d5ec49f87c5131f47b2c5d"),
@@ -44,8 +45,8 @@ def test_api():
         </div>
         """
 
-        # 2. Test generate-parser
-        print("\nTesting /api/generate-parser...")
+        # 2a. Test generate-parser missing API key failure
+        print("\nTesting /api/generate-parser missing API key...")
         payload_gen = {
             "html_snippet": html_snippet,
             "context_url": "https://example.com/store",
@@ -57,30 +58,127 @@ def test_api():
                 "keywords": "keyboards, gaming, mouse",
             },
         }
-        r_gen = client.post("/api/generate-parser", json=payload_gen, headers=headers)
-        assert r_gen.status_code == 200
-        res_gen = r_gen.json()
-        print("Generation Success:", res_gen["success"])
-        print("Selectors Inferred:", res_gen["selectors"])
+        r_gen_fail = client.post("/api/generate-parser", json=payload_gen, headers=headers)
+        assert r_gen_fail.status_code == 200
+        res_gen_fail = r_gen_fail.json()
+        assert res_gen_fail["success"] is False
+        assert "No Gemini API key provided" in res_gen_fail["message"]
+        print("Missing API key failure test passed!")
 
-        generated_code = res_gen["generated_code"]
-        print("Generated code preview:")
-        print("\n".join(generated_code.splitlines()[:15]))
-        print("...")
+        # 2b. Test generate-parser with mock API key and mocked agent run
+        print("\nTesting /api/generate-parser success with mocked agent run...")
+        
+        # Define mock agent run
+        def mock_agent_run(user_id, session_id, new_message):
+            from main import generator_runner
+            app_name = generator_runner.app_name
+            session = generator_runner.session_service.sessions[app_name][user_id][session_id]
+            session.state["generated_code"] = """
+```json
+{
+  "item_selector": ".product-card",
+  "title_selector": ".title",
+  "price_selector": ".price",
+  "url_selector": "a"
+}
+```
 
-        # If heuristics/mock mode is active, check if comments are present
-        if (
-            "Generated BeautifulSoup Parser conforming to sdk_blueprint.py"
-            in generated_code
-        ):
-            assert (
-                "# User Context/Guidelines: Extract rating and reviews as custom metadata fields."
-                in generated_code
-            )
-            assert "# Webpage Context: " in generated_code
-            print(
-                "Heuristics verification: user_context and webpage_context comments found in generated code!"
-            )
+```python
+import re
+from bs4 import BeautifulSoup
+from sdk_blueprint import ExtractedCatalogItem, AgenticCatalogSDK
+
+def extract_items(html_content: str, base_url: str = "https://example.com/store") -> list:
+    soup = BeautifulSoup(html_content, 'html.parser')
+    results = []
+    for item in soup.select(".product-card"):
+        title_el = item.select_one(".title")
+        title = title_el.get_text(strip=True) if title_el else ""
+        price_el = item.select_one(".price")
+        price = 0.0
+        if price_el:
+            price_match = re.search(r'\\d+(?:[.,]\\d+)?', price_el.get_text())
+            if price_match:
+                price = float(price_match.group(0))
+        url_el = item.select_one("a")
+        source_url = ""
+        if url_el and url_el.has_attr('href'):
+            from urllib.parse import urljoin
+            source_url = urljoin(base_url, url_el['href'])
+        
+        catalog_item = ExtractedCatalogItem(
+            title=title,
+            price=price,
+            source_url=source_url,
+            metadata={}
+        )
+        results.append(catalog_item.model_dump())
+    return results
+```
+"""
+            session.state["parser_generation_result"] = {
+                "selectors": {
+                    "item_selector": ".product-card",
+                    "title_selector": ".title",
+                    "price_selector": ".price",
+                    "url_selector": "a"
+                },
+                "code": """
+import re
+from bs4 import BeautifulSoup
+from sdk_blueprint import ExtractedCatalogItem, AgenticCatalogSDK
+
+def extract_items(html_content: str, base_url: str = "https://example.com/store") -> list:
+    soup = BeautifulSoup(html_content, 'html.parser')
+    results = []
+    for item in soup.select(".product-card"):
+        title_el = item.select_one(".title")
+        title = title_el.get_text(strip=True) if title_el else ""
+        price_el = item.select_one(".price")
+        price = 0.0
+        if price_el:
+            price_match = re.search(r'\\d+(?:[.,]\\d+)?', price_el.get_text())
+            if price_match:
+                price = float(price_match.group(0))
+        url_el = item.select_one("a")
+        source_url = ""
+        if url_el and url_el.has_attr('href'):
+            from urllib.parse import urljoin
+            source_url = urljoin(base_url, url_el['href'])
+        
+        catalog_item = ExtractedCatalogItem(
+            title=title,
+            price=price,
+            source_url=source_url,
+            metadata={}
+        )
+        results.append(catalog_item.model_dump())
+    return results
+"""
+            }
+            return []
+
+        with patch("main.generator_runner.run", side_effect=mock_agent_run), \
+             patch.dict("os.environ", {"GEMINI_API_KEY": "mock-api-key"}):
+            r_gen = client.post("/api/generate-parser", json=payload_gen, headers=headers)
+            assert r_gen.status_code == 200
+            res_gen = r_gen.json()
+            print("DEBUG RES_GEN:", res_gen)
+            assert res_gen["success"] is True
+            assert "Successfully generated and validated parser script" in res_gen["message"]
+            assert res_gen["selectors"] == {
+                "item_selector": ".product-card",
+                "title_selector": ".title",
+                "price_selector": ".price",
+                "url_selector": "a"
+            }
+            
+            generated_code = res_gen["generated_code"]
+            print("Generation Success:", res_gen["success"])
+            print("Selectors Inferred:", res_gen["selectors"])
+            print("Generated code preview:")
+            print("\n".join(generated_code.splitlines()[:15]))
+            print("...")
 
         # 3. Test execute-parser
         print("\nTesting /api/execute-parser...")

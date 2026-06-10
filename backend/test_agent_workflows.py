@@ -118,3 +118,73 @@ def test_instant_search_missing_session():
     response = client.post("/api/instant-search", json=payload)
     assert response.status_code == 404
     assert "No active search session found" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_parser_validator_structured_result_success():
+    """Verify that ParserScriptValidator successfully validates compliant scraper code from structured result."""
+    valid_code = """
+def extract_items(html_content, base_url=""):
+    return [
+        {
+            "title": "Item A",
+            "price": 19.99,
+            "source_url": "https://example.com/a",
+            "metadata": {}
+        }
+    ]
+"""
+    session = await test_runner.session_service.create_session(
+        app_name=test_runner.app_name, user_id="test_user", session_id="test_session_structured"
+    )
+    session.state["parser_generation_result"] = {
+        "code": valid_code,
+        "selectors": {
+            "item_selector": ".product-card",
+            "title_selector": ".title",
+            "price_selector": ".price",
+            "url_selector": "a"
+        }
+    }
+    session.state["html_snippet"] = "<div></div>"
+    session.state["full_htmls"] = ["<div></div>"]
+
+    context = DummyContext(session)
+    validator = ParserScriptValidator(name="validator")
+
+    events = []
+    async for event in validator._run_async_impl(context):
+        events.append(event)
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.author == "validator"
+    assert event.actions is not None
+    assert event.actions.escalate is True
+    assert event.actions.state_delta.get("error_feedback") is None
+
+
+@pytest.mark.asyncio
+async def test_parser_validator_missing_html_error():
+    """Verify that ParserScriptValidator catches missing HTML content and sets error_feedback state."""
+    session = await test_runner.session_service.create_session(
+        app_name=test_runner.app_name, user_id="test_user", session_id="test_session_missing_html"
+    )
+    session.state["generated_code"] = "def extract_items(html): return []"
+    session.state["html_snippet"] = ""
+    session.state["full_htmls"] = []
+
+    context = DummyContext(session)
+    validator = ParserScriptValidator(name="validator")
+
+    events = []
+    async for event in validator._run_async_impl(context):
+        events.append(event)
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.author == "validator"
+    assert event.actions is not None
+    assert "error_feedback" in event.actions.state_delta
+    assert "No HTML content was provided" in event.actions.state_delta["error_feedback"]
+

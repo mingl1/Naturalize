@@ -24,6 +24,7 @@
   let isSelectingNextButton = false;
   let isGeneratingCode = false;
   let isPaginationActive = false;
+  let deduplicationKeys = ["title"];
 
   // Detail steps and recording variables
   let extractionMode = "simple"; // 'simple' | 'advanced'
@@ -821,6 +822,7 @@
         if (data.success) {
           generatedCode = data.generated_code;
           inferredSelectors = data.selectors;
+          deduplicationKeys = data.deduplication_keys || ["title"];
 
           document.getElementById("ag-code-view").textContent = generatedCode;
           document.getElementById("ag-execute-btn").disabled = false;
@@ -833,7 +835,11 @@
             `Inferred Selectors: ${JSON.stringify(inferredSelectors)}`,
             "success",
           );
-          autoSaveParser(generatedCode, inferredSelectors);
+          addPanelLog(
+            `Recommended Deduplication Keys: ${JSON.stringify(deduplicationKeys)}`,
+            "success",
+          );
+          autoSaveParser(generatedCode, inferredSelectors, deduplicationKeys);
         } else {
           addPanelLog(
             `Backend failed to generate code: ${data.message}`,
@@ -859,7 +865,7 @@
   /**
    * Auto-saves the generated parser code to chrome.storage.local
    */
-  function autoSaveParser(code, selectors) {
+  function autoSaveParser(code, selectors, dedupKeys) {
     if (!isContextValid() || !chrome.storage || !chrome.storage.local) {
       addPanelLog("Extension context invalid; auto-save skipped.", "error");
       return;
@@ -876,6 +882,7 @@
           timestamp: Date.now(),
           code: code,
           selectors: selectors,
+          deduplication_keys: dedupKeys || ["title"],
           title: document.title || window.location.hostname,
           detail_steps_enabled: detailStepsEnabled,
           expand_steps: expandSteps,
@@ -888,6 +895,7 @@
           parsers[existingIdx].timestamp = Date.now();
           parsers[existingIdx].url = window.location.href;
           parsers[existingIdx].title = document.title || window.location.hostname;
+          parsers[existingIdx].deduplication_keys = dedupKeys || ["title"];
           parsers[existingIdx].detail_steps_enabled = detailStepsEnabled;
           parsers[existingIdx].expand_steps = expandSteps;
           parsers[existingIdx].close_steps = closeSteps;
@@ -950,7 +958,8 @@
         collected_html: [firstPageHtml],
         generated_code: generatedCode,
         collection_name: "visual_extract_items",
-        unique_key: "title",
+        unique_key: deduplicationKeys[0] || "title",
+        unique_keys: deduplicationKeys,
         delay: delay,
       };
 
@@ -982,7 +991,8 @@
       generated_code: generatedCode,
       full_html: fullHtml,
       collection_name: "visual_extract_items",
-      unique_key: "title",
+      unique_key: deduplicationKeys[0] || "title",
+      unique_keys: deduplicationKeys,
     })
       .then((data) => {
         document.getElementById("ag-execute-btn").disabled = false;
@@ -1126,6 +1136,7 @@
       state.generated_code,
       state.collection_name,
       state.unique_key,
+      state.unique_keys,
     );
     if (isContextValid() && chrome.storage && chrome.storage.local) {
       try {
@@ -1144,7 +1155,7 @@
   /**
    * Sends the collected page HTML array to the backend for unified parsing
    */
-  function submitAggregatedHtmls(htmls, code, collectionName, uniqueKey) {
+  function submitAggregatedHtmls(htmls, code, collectionName, uniqueKey, uniqueKeys) {
     addPanelLog(
       `Submitting ${htmls.length} aggregated pages for parser execution...`,
       "info",
@@ -1158,6 +1169,7 @@
       full_htmls: htmls,
       collection_name: collectionName,
       unique_key: uniqueKey,
+      unique_keys: uniqueKeys,
     })
       .then((data) => {
         if (executeBtn) executeBtn.disabled = false;

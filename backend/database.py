@@ -5,8 +5,9 @@ import hashlib
 import datetime
 from bson import ObjectId
 from pymongo import MongoClient
-import google.generativeai as genai
+from google import genai
 import contextvars
+from typing import Any
 
 # Context variable to hold user ID during request execution
 current_user_id = contextvars.ContextVar("current_user_id", default=None)
@@ -106,11 +107,21 @@ def update_user_gemini_key(user_id: str, gemini_api_key: str) -> bool:
     return res.modified_count > 0
 
 # Items & Collections logic
-def save_items_to_db(user_id: str, collection_name: str, items: list, unique_key: str = "title"):
+def save_items_to_db(user_id: str, collection_name: str, items: list, unique_keys: Any = None, **kwargs):
     """
     Upserts a list of parsed items under a specific user and collection name.
+    Supports single or compound unique_keys (e.g. ['title', 'metadata.duration']).
     """
     db = _get_db()
+    if not unique_keys:
+        unique_keys = kwargs.get("unique_key")
+
+    if not unique_keys:
+        unique_keys = ["title"]
+    elif isinstance(unique_keys, str):
+        unique_keys = [unique_keys]
+
+    seen_keys = set()
     saved_count = 0
     for item in items:
         # Standardize properties
@@ -135,30 +146,66 @@ def save_items_to_db(user_id: str, collection_name: str, items: list, unique_key
             "collection_name": collection_name
         }
         
-        if unique_key in ["title", "price", "source_url"]:
-            filter_doc[unique_key] = title if unique_key == "title" else (price if unique_key == "price" else source_url)
-        else:
-            filter_doc[f"metadata.{unique_key}"] = metadata.get(unique_key)
-            
-        db.items.update_one(
-            filter_doc,
-            {
-                "$set": {
-                    "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
-                    "collection_name": collection_name,
-                    "title": title,
-                    "price": price,
-                    "source_url": source_url,
-                    "metadata": metadata,
-                    "updated_at": datetime.datetime.utcnow()
+        has_unique_value = True
+        unique_vals = []
+        for key in unique_keys:
+            if key in ["title", "price", "source_url"]:
+                val = title if key == "title" else (price if key == "price" else source_url)
+            else:
+                meta_key = key.removeprefix("metadata.")
+                val = metadata.get(meta_key)
+
+            if val is not None and val != "":
+                if key in ["title", "price", "source_url"]:
+                    filter_doc[key] = val
+                else:
+                    filter_doc[f"metadata.{meta_key}"] = val
+                unique_vals.append(f"{key}:{str(val)}")
+            else:
+                has_unique_value = False
+                break
+
+        if has_unique_value:
+            val_str = "|".join(unique_vals)
+            if val_str in seen_keys:
+                # Already processed this unique key combination in the current batch. Force insert to prevent overwriting.
+                has_unique_value = False
+            else:
+                seen_keys.add(val_str)
+
+        if not has_unique_value:
+            # Force insert by generating a unique _id since there's no valid unique value to upsert on
+            filter_doc = {
+                "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
+                "collection_name": collection_name,
+                "_id": ObjectId()
+            }
+
+
+
+        try:
+            db.items.update_one(
+                filter_doc,
+                {
+                    "$set": {
+                        "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
+                        "collection_name": collection_name,
+                        "title": title,
+                        "price": price,
+                        "source_url": source_url,
+                        "metadata": metadata,
+                        "updated_at": datetime.datetime.utcnow()
+                    },
+                    "$setOnInsert": {
+                        "created_at": datetime.datetime.utcnow()
+                    }
                 },
-                "$setOnInsert": {
-                    "created_at": datetime.datetime.utcnow()
-                }
-            },
-            upsert=True
-        )
-        saved_count += 1
+                upsert=True
+            )
+            saved_count += 1
+        except Exception as e:
+            print(f"[Warning] Failed to save item '{title}' to database: {e}")
+
         
     return saved_count
 
@@ -208,8 +255,7 @@ def search_collection_items_list(user_id: str, collection_name: str, query_str: 
                     "metadata": item.get("metadata", {})
                 })
             
-            genai.configure(api_key=gemini_key)
-            model = genai.GenerativeModel("gemini-3.5-flash")
+            client = genai.Client(api_key=gemini_key)
             
             prompt = f"""You are a semantic search engine filtering scraped catalog items.
 The user is searching for: "{query_str}"
@@ -222,7 +268,10 @@ Return a JSON array of matching item ID strings in order of relevance, like this
 If no items match, return an empty array: [].
 Do NOT include any explanations, markdown code blocks, backticks, or text other than the raw JSON array.
 """
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+                model="gemini-3.5-flash",
+                contents=prompt,
+            )
             text_resp = response.text.strip()
             
             # Extract JSON list if LLM wrapped in markdown

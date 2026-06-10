@@ -6,7 +6,7 @@ import traceback
 import uuid
 from typing import Any, AsyncGenerator, Dict, List
 
-import google.generativeai as genai
+from google import genai
 from google.adk.agents import Agent, BaseAgent, LlmAgent, LoopAgent, SequentialAgent
 from google.adk.agents.callback_context import CallbackContext
 from google.adk.agents.invocation_context import InvocationContext
@@ -18,14 +18,13 @@ from mcp import StdioServerParameters
 from pydantic import BaseModel, Field
 from pymongo import MongoClient
 
-# Configure Gemini
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 # MongoDB direct connection for schema sampling and instant search
-MONGO_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/scraped_db")
+MONGO_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017/naturalize")
 mongo_client = MongoClient(MONGO_URI)
-db = mongo_client["scraped_db"]
-collection = db["catalog_items"]
+db = mongo_client["naturalize"]
+collection = db["items"]
+
 
 # ==========================================
 # 1. Structured Response schemas
@@ -64,6 +63,29 @@ class SearchResultResponse(BaseModel):
     )
 
 
+
+class SelectorsSchema(BaseModel):
+    item_selector: str = Field(default="", description="CSS selector for the repeating item card/row container")
+    title_selector: str = Field(default="", description="CSS selector for the item title element relative to the container")
+    price_selector: str = Field(default="", description="CSS selector for the item price element relative to the container")
+    url_selector: str = Field(default="", description="CSS selector for the item URL/link element relative to the container")
+
+
+class ParserGenerationResult(BaseModel):
+    selectors: SelectorsSchema = Field(
+        default_factory=SelectorsSchema,
+        description="Inferred CSS selectors mapping fields to selectors"
+    )
+    code: str = Field(
+        description="The complete, runnable Python code of the BeautifulSoup script. Do NOT include markdown code blocks (like ```python or ```) in this string; it must be raw python code only."
+    )
+    deduplication_keys: List[str] = Field(
+        default_factory=lambda: ["title"],
+        description="List of fields (e.g. ['title'], ['source_url'], ['title', 'metadata.duration']) to use as a compound key for database deduplication."
+    )
+
+
+
 # ==========================================
 # 2. Scraping Script Validator & Generator Loop
 # ==========================================
@@ -79,7 +101,14 @@ class ParserScriptValidator(BaseAgent):
         self, context: InvocationContext
     ) -> AsyncGenerator[Event, None]:
         state = context.session.state
-        generated_code = state.get("generated_code")
+        parser_result = state.get("parser_generation_result")
+        generated_code = ""
+        if parser_result and isinstance(parser_result, dict):
+            generated_code = parser_result.get("code") or ""
+        
+        if not generated_code:
+            generated_code = state.get("generated_code")
+
         html_snippet = state.get("html_snippet", "")
         full_htmls = state.get("full_htmls") or []
         user_context = state.get("user_context", "")
@@ -97,22 +126,20 @@ class ParserScriptValidator(BaseAgent):
             )
             return
 
+        if not full_htmls:
+            yield Event(
+                author=self.name,
+                state={
+                    "error_feedback": "Error: No HTML content was provided for validation. Please provide either full_htmls or html_snippet."
+                },
+            )
+            return
+
+
         # 1. Compile & Execution Sandbox test
         try:
-            # Strip standard markdown block wrappers if model outputted them despite instructions
-            code_clean = generated_code
-            if "```python" in code_clean:
-                match = re.search(
-                    r"```python\s*\n(.*?)\s*```", code_clean, re.DOTALL
-                )
-                if match:
-                    code_clean = match.group(1)
-            elif "```" in code_clean:
-                match = re.search(
-                    r"```\s*\n(.*?)\s*```", code_clean, re.DOTALL
-                )
-                if match:
-                    code_clean = match.group(1)
+            from generator import _extract_code_block
+            code_clean = _extract_code_block(generated_code, "python")
 
             compiled_code = compile(code_clean, "<string>", "exec")
             local_namespace = {}
@@ -161,7 +188,7 @@ class ParserScriptValidator(BaseAgent):
         if not user_context:
             return "SUCCESS"
         try:
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            client = genai.Client()
             prompt = f"""
             Determine if the sample extracted item satisfies the user's specific parsing request.
 
@@ -179,7 +206,10 @@ class ParserScriptValidator(BaseAgent):
             If all requested fields/instructions are satisfied, output exactly: SUCCESS
             If any fields are missing or incorrectly parsed, output a short explanation of what is missing/wrong. Do not add any markdown formatting or extra text.
             """
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(
+                model="gemini-3.5-flash",
+                contents=prompt,
+            )
             return response.text.strip()
         except Exception as e:
             print(f"[Warning] LLM judge failed: {e}")
@@ -194,21 +224,44 @@ def developer_prompt_injector(
     html_snippet = state.get("html_snippet", "")
     user_context = state.get("user_context", "")
     error_feedback = state.get("error_feedback") or "None"
+    context_url = state.get("context_url", "")
+    webpage_context = state.get("webpage_context") or {}
 
-    context_prefix = f"""
-=== CONTEXT STATE ===
-Target HTML Snippet:
-```html
-{html_snippet}
-```
+    prompt_parts = [
+        "=== CONTEXT STATE ===",
+        "Target HTML Snippet:",
+        "```html",
+        html_snippet,
+        "```",
+        f"\nContext Source URL: {context_url or 'Unknown'}",
+    ]
 
-User Guidelines:
-{user_context}
+    if webpage_context:
+        prompt_parts.append("\nWebpage Metadata Context:")
+        if webpage_context.get("url"):
+            prompt_parts.append(f"- URL: {webpage_context['url']}")
+        if webpage_context.get("title"):
+            prompt_parts.append(f"- Title: {webpage_context['title']}")
+        if webpage_context.get("description"):
+            prompt_parts.append(f"- Description: {webpage_context['description']}")
+        if webpage_context.get("keywords"):
+            prompt_parts.append(f"- Keywords: {webpage_context['keywords']}")
 
-Previous Run Feedback:
-{error_feedback}
-=====================
-"""
+    if user_context:
+        prompt_parts.append("\nUser Guidelines / Instructions:")
+        prompt_parts.append(user_context)
+        prompt_parts.append(
+            "\nIMPORTANT: Prioritize any fields specified in the User Guidelines. "
+            "The BeautifulSoup parser script MUST extract the standard ExtractedCatalogItem fields (title, price, source_url) "
+            "and any other requested custom fields. ALL custom fields MUST be populated inside the `metadata` dictionary "
+            "of the ExtractedCatalogItem model so that the schema validation succeeds."
+        )
+
+    prompt_parts.append(f"\nPrevious Run Feedback:\n{error_feedback}")
+    prompt_parts.append("=====================")
+
+    context_prefix = "\n".join(prompt_parts)
+
     if llm_request.contents:
         first_content = llm_request.contents[0]
         if first_content.parts:
@@ -218,31 +271,36 @@ Previous Run Feedback:
 
 # Code Generator Developer Agent
 developer_agent = Agent(
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash",
     name="developer_agent",
     description="Writes robust BeautifulSoup code to extract data from snippets",
     instruction="""
     You are an expert Python scraping developer.
     Your task is to write a BeautifulSoup parsing script that extracts list/grid items from HTML.
 
-    You will be provided with the target HTML snippet, user guidelines, and any previous feedback.
+    You will be provided with the target HTML snippet, webpage metadata context, context source URL, user guidelines, and any previous feedback.
 
     ### Guidelines for the Generated Script:
     1. The script must contain exactly this function signature:
-       `def extract_items(html_content: str, base_url: str = "") -> List[Dict[str, Any]]:`
+       `def extract_items(html_content: str, base_url: str = "<default_url>") -> List[Dict[str, Any]]:`
+       where you replace `<default_url>` with the actual Context Source URL (if provided in context state), otherwise `""`.
     2. The function must parse `html_content` using BeautifulSoup, locate repeating containers, and return a list of dictionaries matching the ExtractedCatalogItem schema (title: str, price: float, source_url: str, metadata: dict).
     3. Loop over repeating card/row containers and extract fields RELATIVE to each card (using container.find or container.select_one).
     4. Clean all strings and strip leading/trailing whitespaces.
     5. Price must be normalized to a clean `float`. (e.g. "$1,249.99" -> 1249.99). Fallback to 0.0 if missing.
     6. Resolve relative paths using `urllib.parse.urljoin(base_url, link)`.
     7. All custom requested fields from the User Guidelines must be parsed and stored inside the `metadata` dictionary of the returned items.
+    8. Import `ExtractedCatalogItem` and `AgenticCatalogSDK` from `sdk_blueprint` at the top of your script (e.g., `from sdk_blueprint import ExtractedCatalogItem, AgenticCatalogSDK`).
+    9. Determine the most appropriate fields to uniquely identify each item for deduplication and output them in the `deduplication_keys` field. For example:
+       - If items represent unique entities with unique urls (e.g. products, detailed posts), use `["source_url"]`.
+       - If items are repeat events/matches without unique URLs (e.g. game matches, logs), use a combination of fields like `["title", "metadata.duration"]` or `["title", "metadata.time_ago"]`.
+       - If items have unique titles, use `["title"]`.
 
     If `error_feedback` is present and not "None", inspect the bug or validation error, correct your code, and output the updated script.
-
-    Write ONLY the complete Python script inside a single ```python code block.
     """,
     before_model_callback=developer_prompt_injector,
-    output_key="generated_code",
+    output_schema=ParserGenerationResult,
+    output_key="parser_generation_result",
 )
 
 # Robust scraping generator LoopAgent
@@ -342,7 +400,7 @@ def cache_query_parts_callback(
 # Q&A Agent using the MongoDB MCP server
 doc_qa_agent = LlmAgent(
     name="doc_qa_agent",
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash",
     description="Structured Q&A search agent querying catalog data using Vector Search and dynamic filters",
     instruction="""
     You are an expert Q&A assistant querying catalog documents in MongoDB.

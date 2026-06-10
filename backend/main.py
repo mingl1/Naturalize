@@ -162,7 +162,6 @@ async def generate_parser(request: SnippetGenerationRequest, authorization: Opti
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
         user = database.get_user_by_token(token)
-        
     gemini_key = None
     if user:
         gemini_key = user.get("gemini_api_key")
@@ -175,73 +174,87 @@ async def generate_parser(request: SnippetGenerationRequest, authorization: Opti
             status_code=400, detail="HTML snippet content cannot be empty."
         )
 
+    if not gemini_key:
+        return SnippetGenerationResponse(
+            success=False,
+            generated_code="",
+            selectors={},
+            message="No Gemini API key provided. Please set your key in the extension settings or as an environment variable.",
+        )
+
     # Patch the GEMINI_API_KEY env variable temporarily for this run
     old_key = os.environ.get("GEMINI_API_KEY")
-    if gemini_key:
-        os.environ["GEMINI_API_KEY"] = gemini_key
+    os.environ["GEMINI_API_KEY"] = gemini_key
     
-    try:
-        success, code, selectors, message = generate_parser_code(
-            html_snippet=request.html_snippet,
-            context_url=request.context_url,
-            user_context=request.user_context,
-            webpage_context=request.webpage_context,
-        )
-    finally:
-        # Restore old key
-        if old_key is not None:
-            os.environ["GEMINI_API_KEY"] = old_key
-        elif "GEMINI_API_KEY" in os.environ:
-            del os.environ["GEMINI_API_KEY"]
-
-    # If no keys are set, fallback immediately to local heuristics
-    if not gemini_key:
-        success, code, selectors, message = generate_parser_code(
-            html_snippet=request.html_snippet,
-            context_url=request.context_url,
-            user_context=request.user_context,
-            webpage_context=request.webpage_context,
-        )
-        return SnippetGenerationResponse(
-            success=success, generated_code=code, selectors=selectors, message=message
-        )
-
     # Execute code generation inside ADK self-improving LoopAgent
     try:
         session_id = str(uuid.uuid4())
+        initial_state = {
+            "html_snippet": request.html_snippet,
+            "user_context": request.user_context or "",
+            "full_htmls": request.full_htmls or [],
+            "error_feedback": None,
+            "context_url": request.context_url or "",
+            "webpage_context": request.webpage_context or {},
+        }
         session = await generator_runner.session_service.create_session(
             app_name=generator_runner.app_name,
             user_id="code_generator_user",
             session_id=session_id,
+            state=initial_state,
         )
 
-        # Load context parameters into session state for validator access
-        session.state["html_snippet"] = request.html_snippet
-        session.state["user_context"] = request.user_context or ""
-        session.state["full_htmls"] = request.full_htmls or []
-        session.state["error_feedback"] = None
 
         from google.genai.types import Part, UserContent
 
         content = UserContent(parts=[Part(text="Start writing the parser.")])
 
         # Run LoopAgent workflow (Developer agent + ParserScriptValidator)
-        generator_runner.run(
+        events = generator_runner.run(
             user_id=session.user_id, session_id=session.id, new_message=content
         )
+        print(f"[Generate Parser] Starting LoopAgent workflow session {session_id}...")
+        for event in events:
+            print(f"[Generate Parser Event] Author: {event.author}")
+            if hasattr(event, "content") and event.content:
+                print(f"  Content: {event.content}")
+            if hasattr(event, "actions") and event.actions:
+                print(f"  Actions: {event.actions}")
 
-        final_code = session.state.get("generated_code")
+        # Retrieve the updated session from the session service to read changes
+        session = await generator_runner.session_service.get_session(
+            app_name=generator_runner.app_name,
+            user_id=session.user_id,
+            session_id=session.id,
+        )
+
+        parser_result = session.state.get("parser_generation_result")
+        raw_generated_code = session.state.get("generated_code")
         error_feedback = session.state.get("error_feedback")
+        print(f"[Generate Parser] Workflow finished. Has parser_generation_result: {bool(parser_result)}, Has generated_code: {bool(raw_generated_code)}, error_feedback: {error_feedback}")
+
+        final_code = ""
+        selectors = {}
+        deduplication_keys = ["title"]
+        from generator import _clean_python_code
+        if parser_result and isinstance(parser_result, dict):
+            final_code = parser_result.get("code") or ""
+            selectors = parser_result.get("selectors") or {}
+            deduplication_keys = parser_result.get("deduplication_keys") or ["title"]
+            final_code = _clean_python_code(final_code)
+        elif raw_generated_code:
+            from generator import (_extract_code_block,
+                                   _infer_selectors_from_text)
+            selectors = _infer_selectors_from_text(raw_generated_code)
+            final_code = _extract_code_block(raw_generated_code, "python")
+            final_code = _clean_python_code(final_code)
 
         if final_code and not error_feedback:
-            # Infer selectors from the final clean code
-            from generator import _infer_selectors_from_text
-
-            selectors = _infer_selectors_from_text(final_code)
             return SnippetGenerationResponse(
                 success=True,
                 generated_code=final_code,
                 selectors=selectors,
+                deduplication_keys=deduplication_keys,
                 message="Successfully generated and validated parser script using ADK LoopAgent.",
             )
         else:
@@ -249,8 +262,10 @@ async def generate_parser(request: SnippetGenerationRequest, authorization: Opti
                 success=False,
                 generated_code=final_code or "",
                 selectors={},
+                deduplication_keys=[],
                 message=f"Parser generation failed validation. Last error: {error_feedback}",
             )
+
     except Exception as e:
         return SnippetGenerationResponse(
             success=False,
@@ -258,6 +273,12 @@ async def generate_parser(request: SnippetGenerationRequest, authorization: Opti
             selectors={},
             message=f"Error running ADK generator workflow: {str(e)}",
         )
+    finally:
+        # Restore old key
+        if old_key is not None:
+            os.environ["GEMINI_API_KEY"] = old_key
+        elif "GEMINI_API_KEY" in os.environ:
+            del os.environ["GEMINI_API_KEY"]
 
 @app.post("/api/execute-parser", response_model=ExecutionResponse)
 def execute_parser(request: ExecutionRequest, authorization: Optional[str] = Header(None)):
@@ -328,8 +349,14 @@ def execute_parser(request: ExecutionRequest, authorization: Optional[str] = Hea
 
             # Invoke AgenticCatalogSDK to run bulk_upsert internally if desired
             sdk_class = local_namespace.get("AgenticCatalogSDK")
+            if not sdk_class:
+                from sdk_blueprint import AgenticCatalogSDK as fallback_sdk_class
+                sdk_class = fallback_sdk_class
+                print("ℹ️ [Sandbox] AgenticCatalogSDK not found in generated script namespace. Using system fallback SDK class.")
+
             if sdk_class:
                 sdk_instance = sdk_class()
+
                 import inspect
 
                 try:
@@ -353,10 +380,17 @@ def execute_parser(request: ExecutionRequest, authorization: Optional[str] = Hea
                     elif "catalog_items" in params:
                         kwargs["catalog_items"] = extracted_items
 
+                    # Resolve unique_keys and unique_key
+                    unique_keys = request.unique_keys
+                    if not unique_keys:
+                        unique_keys = [request.unique_key] if request.unique_key else ["title"]
+
+                    if "unique_keys" in params:
+                        kwargs["unique_keys"] = unique_keys
                     if "unique_key" in params:
-                        kwargs["unique_key"] = request.unique_key or "title"
+                        kwargs["unique_key"] = unique_keys[0]
                     elif "key" in params:
-                        kwargs["key"] = request.unique_key or "title"
+                        kwargs["key"] = unique_keys[0]
 
                     if kwargs:
                         sdk_instance.bulk_upsert(**kwargs)
@@ -364,7 +398,8 @@ def execute_parser(request: ExecutionRequest, authorization: Optional[str] = Hea
                         sdk_instance.bulk_upsert(
                             request.collection_name or "catalog_items",
                             extracted_items,
-                            request.unique_key or "title",
+                            unique_keys[0],
+                            unique_keys,
                         )
                 except Exception as ex:
                     print(f"Error calling SDK bulk_upsert: {ex}")
@@ -373,15 +408,24 @@ def execute_parser(request: ExecutionRequest, authorization: Optional[str] = Hea
                         sdk_instance.bulk_upsert(
                             request.collection_name or "catalog_items",
                             extracted_items,
-                            request.unique_key or "title",
+                            unique_keys[0],
+                            unique_keys,
                         )
                     except TypeError:
                         try:
                             sdk_instance.bulk_upsert(
-                                extracted_items, request.unique_key or "title"
+                                request.collection_name or "catalog_items",
+                                extracted_items,
+                                unique_keys[0],
                             )
                         except TypeError:
-                            sdk_instance.bulk_upsert(extracted_items)
+                            try:
+                                sdk_instance.bulk_upsert(
+                                    extracted_items, unique_keys[0]
+                                )
+                            except TypeError:
+                                sdk_instance.bulk_upsert(extracted_items)
+
 
         logs = stdout_buffer.getvalue()
         return ExecutionResponse(

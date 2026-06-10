@@ -2,7 +2,7 @@ import os
 import re
 from typing import Any, Dict, Tuple
 
-import google.generativeai as genai
+from google import genai
 from bs4 import BeautifulSoup
 from openai import OpenAI
 
@@ -109,8 +109,7 @@ def _generate_with_gemini(
     webpage_context: Dict[str, Any] = None,
 ) -> Tuple[bool, str, Dict[str, str], str]:
     try:
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-3.5-flash")
+        client = genai.Client(api_key=api_key)
 
         prompt_parts = [
             SYSTEM_INSTRUCTIONS,
@@ -147,7 +146,10 @@ def _generate_with_gemini(
         )
         prompt = "\n".join(prompt_parts)
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model="gemini-3.5-flash",
+            contents=prompt,
+        )
         text = response.text
 
         # Extract selectors and code
@@ -391,16 +393,31 @@ if __name__ == "__main__":
 
 def _extract_code_block(text: str, language: str) -> str:
     # 1. First try to find a block explicitly labeled with the language name (e.g., ```python)
-    pattern = rf"```(?:{language})\s*\n(.*?)\s*```"
-    match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+    pattern = rf"```(?:{language})\b"
+    match = re.search(pattern, text, re.IGNORECASE)
     if match:
-        return match.group(1).strip()
+        start_idx = match.end()
+        # Find the next ``` after the start of this block
+        end_idx = text.find("```", start_idx)
+        if end_idx != -1:
+            code = text[start_idx:end_idx]
+        else:
+            code = text[start_idx:]
+        return code.strip()
 
-    # 2. If not found, try to find any unlabeled block (e.g., ``` without language)
-    pattern_unlabeled = r"```\s*\n(.*?)\s*```"
-    match_unlabeled = re.search(pattern_unlabeled, text, re.DOTALL | re.IGNORECASE)
-    if match_unlabeled:
-        return match_unlabeled.group(1).strip()
+    # 2. Try to find any block starting with just ```
+    parts = text.split("```")
+    if len(parts) >= 3:
+        # Text between first and second ```
+        code = parts[1]
+        # If code starts with a word (e.g. 'py\n' or 'python\n'), strip that word
+        code_clean = re.sub(r"^[a-zA-Z0-9+_#-]+\s*\n", "", code)
+        return code_clean.strip()
+    elif len(parts) == 2:
+        # Truncated block
+        code = parts[1]
+        code_clean = re.sub(r"^[a-zA-Z0-9+_#-]+\s*\n", "", code)
+        return code_clean.strip()
 
     return text.strip()
 

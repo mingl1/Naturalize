@@ -34,6 +34,9 @@ class SnippetGenerationResponse(BaseModel):
     selectors: Dict[str, Any] = Field(
         default_factory=dict, description="Inferred CSS selectors for the data items"
     )
+    deduplication_keys: List[str] = Field(
+        default_factory=list, description="List of fields to use for unique deduplication"
+    )
     message: str = Field(description="Status message or error logs")
 
 
@@ -53,6 +56,10 @@ class ExecutionRequest(BaseModel):
     unique_key: Optional[str] = Field(
         default="title", description="The unique key for upserting"
     )
+    unique_keys: Optional[List[str]] = Field(
+        default=None, description="Optional list of compound fields for unique deduplication"
+    )
+
 
 
 class ExecutionResponse(BaseModel):
