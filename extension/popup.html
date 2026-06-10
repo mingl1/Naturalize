@@ -38,6 +38,9 @@
       <button class="tab-btn" id="tab-history" data-target="history-content">
         History
       </button>
+      <button class="tab-btn" id="tab-settings" data-target="settings-content">
+        Settings
+      </button>
     </div>
 
     <!-- Locator Content View -->
@@ -122,6 +125,23 @@
       <span class="section-title">Saved Parsers</span>
       <div class="history-list custom-scrollbar" id="history-list">
         <p class="no-history-text">No saved parser scripts yet. Generate one to auto-save!</p>
+      </div>
+    </div>
+
+    <!-- Settings View -->
+    <div id="settings-content" class="tab-content" style="display: none;">
+      <span class="section-title">Extension Settings</span>
+      <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 10px; padding: 12px; background: rgba(30, 27, 75, 0.2); border: 1px solid rgba(139, 92, 246, 0.15); border-radius: 8px;">
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label for="extension-token-input" style="font-size: 10px; font-weight: 700; color: #a78bfa; text-transform: uppercase; letter-spacing: 0.05em;">Extension Access Token</label>
+          <input type="password" id="extension-token-input" placeholder="Paste nt_... token here" style="width: 100%; background: #0f172a; border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 6px; padding: 8px 10px; font-size: 11px; color: #f8fafc; font-family: monospace; outline: none; box-sizing: border-box;">
+        </div>
+        <button id="btn-save-token" class="btn-primary" style="height: 28px; min-height: 28px; padding: 0 12px; font-size: 11px; border-radius: 5px; align-self: flex-start; cursor: pointer;">
+          Save Token
+        </button>
+        <p style="font-size: 10px; color: #94a3b8; line-height: 1.4; margin: 4px 0 0 0;">
+          To connect this extension, log in to the dashboard, open settings, copy your Extension Access Token, and paste it here.
+        </p>
       </div>
     </div>
   </main>

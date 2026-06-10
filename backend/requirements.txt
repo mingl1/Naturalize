@@ -7,7 +7,13 @@ google-generativeai>=0.4.0
 openai>=1.12.0
 ruff>=0.3.0
 python-dotenv>=1.0.0
+<<<<<<< HEAD
 google-adk
 mcp
 pymongo
 
+=======
+pymongo>=4.6.0
+dnspython>=2.6.0
+certifi>=2024.2.2
+>>>>>>> 3e79d77b5b2fee3ed8dde3935066e8808cdb3608

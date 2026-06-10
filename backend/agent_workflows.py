@@ -102,13 +102,17 @@ class ParserScriptValidator(BaseAgent):
             # Strip standard markdown block wrappers if model outputted them despite instructions
             code_clean = generated_code
             if "```python" in code_clean:
-                code_clean = re.search(
+                match = re.search(
                     r"```python\s*\n(.*?)\s*```", code_clean, re.DOTALL
-                ).group(1)
+                )
+                if match:
+                    code_clean = match.group(1)
             elif "```" in code_clean:
-                code_clean = re.search(
+                match = re.search(
                     r"```\s*\n(.*?)\s*```", code_clean, re.DOTALL
-                ).group(1)
+                )
+                if match:
+                    code_clean = match.group(1)
 
             compiled_code = compile(code_clean, "<string>", "exec")
             local_namespace = {}
@@ -308,13 +312,17 @@ def cache_query_parts_callback(
             text_json = response.content.parts[0].text
             # Strip potential json codeblock wrappers
             if "```json" in text_json:
-                text_json = re.search(
+                match = re.search(
                     r"```json\s*\n(.*?)\s*```", text_json, re.DOTALL
-                ).group(1)
+                )
+                if match:
+                    text_json = match.group(1)
             elif "```" in text_json:
-                text_json = re.search(
+                match = re.search(
                     r"```\s*\n(.*?)\s*```", text_json, re.DOTALL
-                ).group(1)
+                )
+                if match:
+                    text_json = match.group(1)
 
             data = json.loads(text_json)
             search_id = data.get("search_id")
