@@ -36,7 +36,8 @@ import {
   Database,
   FolderPlus,
   Edit,
-  Trash2
+  Trash2,
+  SlidersHorizontal
 } from 'lucide-react';
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -70,6 +71,49 @@ function App() {
   const [collectionsItems, setCollectionsItems] = useState({});
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [selectedWebsiteFilter, setSelectedWebsiteFilter] = useState('');
+
+  // Dynamic schema filtering states (List of rule-based filter objects)
+  const [activeFilters, setActiveFilters] = useState([]);
+  const [newFilterField, setNewFilterField] = useState('');
+  const [newFilterOperator, setNewFilterOperator] = useState('=');
+  const [newFilterValue, setNewFilterValue] = useState('');
+
+  const resetFilters = () => {
+    setActiveFilters([]);
+    setNewFilterField('');
+    setNewFilterValue('');
+  };
+
+  const handleAddFilter = () => {
+    if (!newFilterField) return;
+    const fieldType = currentSchema ? currentSchema[newFilterField] : 'string';
+    let val = typeof newFilterValue === 'string' ? newFilterValue.trim() : newFilterValue;
+    
+    if (fieldType === 'numeric') {
+      const parsed = parseFloat(val);
+      if (isNaN(parsed)) return;
+      val = parsed;
+    } else if (fieldType === 'boolean') {
+      val = String(val).toLowerCase() === 'true';
+    }
+
+    const newRule = {
+      id: String(Math.random() + Date.now()),
+      field: newFilterField,
+      operator: newFilterOperator,
+      value: val
+    };
+
+    setActiveFilters(prev => {
+      const filtered = prev.filter(f => !(f.field === newFilterField && f.operator === newFilterOperator));
+      return [...filtered, newRule];
+    });
+    setNewFilterValue('');
+  };
+
+  const handleRemoveFilter = (id) => {
+    setActiveFilters(prev => prev.filter(f => f.id !== id));
+  };
 
   // Custom collections CRUD states
   const [createCollectionOpen, setCreateCollectionOpen] = useState(false);
@@ -371,6 +415,11 @@ function App() {
     }
   }, [user]);
 
+  // Reset filters when changing collections, tabs, or when search results are cleared
+  useEffect(() => {
+    resetFilters();
+  }, [activeCollection, activeTab, searchResults === null]);
+
   // Handlers for Authentication
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
@@ -565,16 +614,113 @@ function App() {
     }
   };
 
+  // Gauge schema dynamically from current items list (collection items or search results)
+  // Maps fieldPath (e.g. 'price' or 'metadata.brand') -> fieldType ('numeric', 'boolean', 'string')
+  const currentSchema = useMemo(() => {
+    let sourceItems = [];
+    if (activeTab === 'details' && activeCollection && collectionsItems[activeCollection]) {
+      sourceItems = collectionsItems[activeCollection].items || [];
+    } else if (searchResults !== null) {
+      sourceItems = searchResults;
+    } else {
+      return null;
+    }
+
+    let fields = {
+      "price": "numeric"
+    };
+
+    sourceItems.forEach(item => {
+      if (item.metadata && typeof item.metadata === 'object') {
+        Object.entries(item.metadata).forEach(([key, val]) => {
+          if (key.startsWith('extracted_')) return;
+          if (val === null || val === undefined || val === '') return;
+
+          const fieldPath = `metadata.${key}`;
+          if (!fields[fieldPath]) {
+            let valType = typeof val;
+            if (Array.isArray(val)) {
+              fields[fieldPath] = "string";
+            } else if (valType === 'number') {
+              fields[fieldPath] = "numeric";
+            } else if (valType === 'boolean') {
+              fields[fieldPath] = "boolean";
+            } else {
+              fields[fieldPath] = "string";
+            }
+          }
+        });
+      }
+    });
+
+    return fields;
+  }, [activeTab, activeCollection, collectionsItems, searchResults]);
+
+  const isFilterActive = useMemo(() => {
+    return activeFilters.length > 0;
+  }, [activeFilters]);
+
+  // Filter logic helper applied to any item list
+  const applyHardFilters = (itemsList) => {
+    let items = [...itemsList];
+
+    activeFilters.forEach(rule => {
+      const { field, operator, value } = rule;
+
+      items = items.filter(item => {
+        let val;
+        if (field === 'price') {
+          val = item.price;
+        } else if (field.startsWith('metadata.')) {
+          const key = field.slice(9);
+          val = item.metadata ? item.metadata[key] : undefined;
+        }
+
+        if (val === undefined || val === null) return false;
+
+        const fieldType = currentSchema ? currentSchema[field] : 'string';
+        if (fieldType === 'numeric') {
+          const numVal = parseFloat(val);
+          const numLimit = parseFloat(value);
+          if (isNaN(numVal) || isNaN(numLimit)) return false;
+
+          if (operator === '<') return numVal < numLimit;
+          if (operator === '>') return numVal > numLimit;
+          if (operator === '=') return numVal === numLimit;
+        } else if (fieldType === 'boolean') {
+          const boolVal = String(val).toLowerCase() === 'true';
+          const boolLimit = String(value).toLowerCase() === 'true';
+          if (operator === '=') return boolVal === boolLimit;
+        } else {
+          // string
+          const strVal = String(val).toLowerCase();
+          const strLimit = String(value).toLowerCase();
+          if (operator === '=') return strVal === strLimit;
+          if (operator === 'contains') return strVal.includes(strLimit);
+        }
+        return true;
+      });
+    });
+
+    return items;
+  };
+
   // Active collection detail item list
   const activeItems = useMemo(() => {
     if (!activeCollection || !collectionsItems[activeCollection]) return [];
-    const rawItems = collectionsItems[activeCollection].items || [];
+    let rawItems = collectionsItems[activeCollection].items || [];
     
     if (selectedWebsiteFilter) {
-      return rawItems.filter(item => getDomain(item.source_url) === selectedWebsiteFilter);
+      rawItems = rawItems.filter(item => getDomain(item.source_url) === selectedWebsiteFilter);
     }
-    return rawItems;
-  }, [activeCollection, collectionsItems, selectedWebsiteFilter]);
+    return applyHardFilters(rawItems);
+  }, [activeCollection, collectionsItems, selectedWebsiteFilter, activeFilters, currentSchema]);
+
+  // Filtered Search Results
+  const filteredSearchResults = useMemo(() => {
+    if (searchResults === null) return null;
+    return applyHardFilters(searchResults);
+  }, [searchResults, activeFilters, currentSchema]);
 
   // Compute total file count across all folders
   const totalFileCount = useMemo(() => {
@@ -779,26 +925,190 @@ function App() {
                       </button>
                     </div>
 
-                    {searchResults.length === 0 ? (
+                    {/* Dynamic Schema Filters inside Search Overlay */}
+                    {searchResults.length > 0 && currentSchema && (
+                      <div className="mb-6 bg-[#22201d]/60 p-5 rounded-xl border border-white/5 shadow-inner">
+                        <div className="flex justify-between items-center mb-4 pb-2 border-b border-white/10">
+                          <div className="flex items-center gap-2">
+                            <SlidersHorizontal className="w-4 h-4 text-[#96a68f]" />
+                            <h3 className="text-xs uppercase font-bold tracking-wider text-zinc-400 font-title">Refine Search Results</h3>
+                          </div>
+                          {isFilterActive && (
+                            <button
+                              onClick={resetFilters}
+                              className="text-[10px] uppercase font-bold text-[#cca678] hover:text-[#d4c2ab] transition-all hover:underline"
+                            >
+                              Clear Active Filters
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Active Rule Tags */}
+                        {activeFilters.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-4">
+                            {activeFilters.map(f => (
+                              <div key={f.id} className="flex items-center gap-1.5 bg-[#8c9c86]/20 border border-[#8c9c86]/40 text-[#f5f2eb] px-2.5 py-1 rounded-md text-[10px] font-mono">
+                                <span className="opacity-75">{f.field === 'price' ? 'price' : f.field.replace('metadata.', '')}</span>
+                                <span className="text-[#cca678] font-bold">{f.operator}</span>
+                                <span>{String(f.value)}</span>
+                                <button 
+                                  onClick={() => handleRemoveFilter(f.id)}
+                                  className="w-3.5 h-3.5 rounded-full hover:bg-white/10 flex items-center justify-center text-[10px] ml-1 transition-colors"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Add Rule Builder Row */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className="flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider text-zinc-500">
+                            <span>Add Rule:</span>
+                          </div>
+
+                          {/* Choose Field dropdown */}
+                          <Select 
+                            value={newFilterField} 
+                            onValueChange={(val) => {
+                              setNewFilterField(val);
+                              const type = currentSchema[val];
+                              if (type === 'numeric') {
+                                setNewFilterOperator('<');
+                                setNewFilterValue('');
+                              } else if (type === 'boolean') {
+                                setNewFilterOperator('=');
+                                setNewFilterValue('true');
+                              } else {
+                                setNewFilterOperator('contains');
+                                setNewFilterValue('');
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="w-[150px] bg-[#12110f]/80 border-white/5 text-xs h-8 text-[#f5f2eb]">
+                              <SelectValue placeholder="Select Field" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#22201d] border-white/10 text-xs">
+                              {Object.keys(currentSchema).map(path => (
+                                <SelectItem key={path} value={path} className="text-[#f5f2eb] hover:bg-white/5 focus:bg-white/5 cursor-pointer">
+                                  {path === 'price' ? 'Price' : path.replace('metadata.', '')}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+
+                          {/* Choose Operator dropdown */}
+                          {newFilterField && (
+                            <Select value={newFilterOperator} onValueChange={setNewFilterOperator}>
+                              <SelectTrigger className="w-[85px] bg-[#12110f]/80 border-white/5 text-xs h-8 text-[#f5f2eb] font-mono">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-[#22201d] border-white/10 text-xs">
+                                {currentSchema[newFilterField] === 'numeric' && (
+                                  <>
+                                    <SelectItem value="<">&lt;</SelectItem>
+                                    <SelectItem value=">">&gt;</SelectItem>
+                                    <SelectItem value="=">=</SelectItem>
+                                  </>
+                                )}
+                                {newFilterField && currentSchema[newFilterField] === 'boolean' && (
+                                  <SelectItem value="=">=</SelectItem>
+                                )}
+                                {newFilterField && currentSchema[newFilterField] === 'string' && (
+                                  <>
+                                    <SelectItem value="contains">contains</SelectItem>
+                                    <SelectItem value="=">=</SelectItem>
+                                  </>
+                                )}
+                              </SelectContent>
+                            </Select>
+                          )}
+
+                          {/* Input value */}
+                          {newFilterField && (
+                            currentSchema[newFilterField] === 'boolean' ? (
+                              <Select value={newFilterValue} onValueChange={setNewFilterValue}>
+                                <SelectTrigger className="w-[100px] bg-[#12110f]/80 border-white/5 text-xs h-8 text-[#f5f2eb]">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="bg-[#22201d] border-white/10 text-xs">
+                                  <SelectItem value="true">TRUE</SelectItem>
+                                  <SelectItem value="false">FALSE</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <input
+                                type={currentSchema[newFilterField] === 'numeric' ? 'number' : 'text'}
+                                placeholder="Value"
+                                value={newFilterValue}
+                                onChange={(e) => setNewFilterValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && newFilterField && newFilterValue) {
+                                    e.preventDefault();
+                                    handleAddFilter();
+                                  }
+                                }}
+                                className="bg-[#12110f]/60 border border-white/5 rounded px-3 h-8 text-xs text-[#f5f2eb] focus:border-[#8c9c86] focus:outline-none focus:ring-1 focus:ring-[#8c9c86]/30 font-mono min-w-[120px] flex-1 max-w-[200px]"
+                              />
+                            )
+                          )}
+
+                          {newFilterField && (
+                            <Button 
+                              onClick={handleAddFilter} 
+                              disabled={!newFilterField || (currentSchema[newFilterField] !== 'boolean' && !newFilterValue)}
+                              className="bg-[#96a68f] hover:bg-[#a9b9a2] text-[#181715] text-xs h-8 px-3.5 font-bold transition-all ml-auto md:ml-0"
+                            >
+                              Add
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {filteredSearchResults.length === 0 ? (
                       <div className="text-center py-20 text-[#a39b90]">
                         <p className="text-lg font-semibold mb-2">No matching items found</p>
-                        <p className="text-sm">Try running queries like "price under 100" or typing alternative keywords.</p>
+                        <p className="text-sm">Try running queries like "price under 100" or clearing active filters.</p>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {searchResults.map(item => (
-                          <div key={item._id} className="bg-[#22201d] border border-white/5 rounded-xl p-4 flex flex-col justify-between hover:border-[#8c9c86]/30 transition-all">
+                        {filteredSearchResults.map(item => (
+                          <div key={item._id} className="bg-[#22201d] border border-white/5 rounded-xl p-4 flex flex-col justify-between hover:border-[#8c9c86]/30 transition-all font-body">
                             <div>
                               <div className="flex justify-between items-start gap-4 mb-2">
                                 <h4 className="font-semibold text-sm line-clamp-2 text-[#f5f2eb]">{item.title}</h4>
-                                <span className="font-title text-base font-bold text-[#cca678]">${item.price?.toFixed(2)}</span>
+                                <span className="font-title text-base font-bold text-[#cca678]">
+                                  {item.price > 0 ? `$${item.price.toFixed(2)}` : 'N/A'}
+                                </span>
                               </div>
                               <span className="text-[10px] bg-white/5 border border-white/10 text-[#a39b90] px-2 py-0.5 rounded-sm uppercase tracking-wider font-semibold">
                                 {getCleanDomainName(getDomain(item.source_url))}
                               </span>
+
+                              {item.metadata && Object.keys(item.metadata).length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-3">
+                                  {Object.entries(item.metadata).map(([key, val]) => {
+                                    if (key.startsWith('extracted_')) return null;
+                                    let dVal = Array.isArray(val) ? val.join(', ') : (typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val));
+                                    if (!dVal || dVal.length > 40) return null;
+
+                                    return (
+                                      <span 
+                                        key={key} 
+                                        className="bg-white/5 border border-white/10 rounded-sm py-0.5 px-1.5 text-[9px] truncate max-w-full font-mono opacity-85"
+                                        title={`${key}: ${dVal}`}
+                                      >
+                                        <strong>{key}:</strong> {dVal}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
                             <div className="mt-4 pt-3 border-t border-dashed border-white/10 flex items-center justify-between text-xs">
-                              <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="text-[#96a68f] hover:underline flex items-center gap-1">
+                              <a href={item.source_url || '#'} target="_blank" rel="noopener noreferrer" className="text-[#96a68f] hover:underline flex items-center gap-1">
                                 <ExternalLink className="w-3 h-3" /> View Source
                               </a>
                               <span className="text-[10px] text-[#a39b90]">Collection: {item.collection_name}</span>
@@ -1051,6 +1361,148 @@ function App() {
                               {web.name} ({web.count})
                             </button>
                           ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Dynamic Schema Filters Panel */}
+                    {currentSchema && (
+                      <div className="mb-6 bg-black/10 p-5 rounded-xl border border-black/15 shadow-inner">
+                        <div className="flex justify-between items-center mb-4 pb-2 border-b border-black/10">
+                          <div className="flex items-center gap-2">
+                            <SlidersHorizontal className="w-4 h-4 opacity-80" />
+                            <h3 className="text-xs uppercase font-bold tracking-wider opacity-85 font-title">Refine Collection Data</h3>
+                          </div>
+                          {isFilterActive && (
+                            <button
+                              onClick={resetFilters}
+                              className="text-[10px] uppercase font-bold text-inherit hover:underline transition-all"
+                            >
+                              Clear Active Filters
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Active Rule Tags */}
+                        {activeFilters.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-4">
+                            {activeFilters.map(f => (
+                              <div key={f.id} className="flex items-center gap-1.5 bg-black/15 border border-black/25 text-inherit px-2.5 py-1 rounded-md text-[10px] font-mono">
+                                <span className="opacity-75">{f.field === 'price' ? 'price' : f.field.replace('metadata.', '')}</span>
+                                <span className="font-bold opacity-90">{f.operator}</span>
+                                <span>{String(f.value)}</span>
+                                <button 
+                                  onClick={() => handleRemoveFilter(f.id)}
+                                  className="w-3.5 h-3.5 rounded-full hover:bg-black/10 flex items-center justify-center text-[10px] ml-1 transition-colors"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Add Rule Builder Row */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div className="flex items-center gap-1 text-[10px] uppercase font-bold tracking-wider opacity-70">
+                            <span>Add Rule:</span>
+                          </div>
+
+                          {/* Choose Field dropdown */}
+                          <Select 
+                            value={newFilterField} 
+                            onValueChange={(val) => {
+                              setNewFilterField(val);
+                              const type = currentSchema[val];
+                              if (type === 'numeric') {
+                                setNewFilterOperator('<');
+                                setNewFilterValue('');
+                              } else if (type === 'boolean') {
+                                setNewFilterOperator('=');
+                                setNewFilterValue('true');
+                              } else {
+                                setNewFilterOperator('contains');
+                                setNewFilterValue('');
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="w-[150px] bg-black/15 border-black/25 text-xs h-8 text-inherit">
+                              <SelectValue placeholder="Select Field" />
+                            </SelectTrigger>
+                            <SelectContent className="bg-[#22201d] border-white/10 text-xs">
+                              {Object.keys(currentSchema).map(path => (
+                                <SelectItem key={path} value={path} className="text-[#f5f2eb] hover:bg-white/5 focus:bg-white/5 cursor-pointer">
+                                  {path === 'price' ? 'Price' : path.replace('metadata.', '')}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+
+                          {/* Choose Operator dropdown */}
+                          {newFilterField && (
+                            <Select value={newFilterOperator} onValueChange={setNewFilterOperator}>
+                              <SelectTrigger className="w-[85px] bg-black/15 border-black/25 text-xs h-8 text-inherit font-mono">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent className="bg-[#22201d] border-white/10 text-xs">
+                                {currentSchema[newFilterField] === 'numeric' && (
+                                  <>
+                                    <SelectItem value="<">&lt;</SelectItem>
+                                    <SelectItem value=">">&gt;</SelectItem>
+                                    <SelectItem value="=">=</SelectItem>
+                                  </>
+                                )}
+                                {newFilterField && currentSchema[newFilterField] === 'boolean' && (
+                                  <SelectItem value="=">=</SelectItem>
+                                )}
+                                {newFilterField && currentSchema[newFilterField] === 'string' && (
+                                  <>
+                                    <SelectItem value="contains">contains</SelectItem>
+                                    <SelectItem value="=">=</SelectItem>
+                                  </>
+                                )}
+                              </SelectContent>
+                            </Select>
+                          )}
+
+                          {/* Input value */}
+                          {newFilterField && (
+                            currentSchema[newFilterField] === 'boolean' ? (
+                              <Select value={newFilterValue} onValueChange={setNewFilterValue}>
+                                <SelectTrigger className="w-[100px] bg-black/15 border-black/25 text-xs h-8 text-inherit">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent className="bg-[#22201d] border-white/10 text-xs">
+                                  <SelectItem value="true">TRUE</SelectItem>
+                                  <SelectItem value="false">FALSE</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <input
+                                type={currentSchema[newFilterField] === 'numeric' ? 'number' : 'text'}
+                                placeholder="Value"
+                                value={newFilterValue}
+                                onChange={(e) => setNewFilterValue(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && newFilterField && newFilterValue) {
+                                    e.preventDefault();
+                                    handleAddFilter();
+                                  }
+                                }}
+                                className="bg-black/15 border border-black/25 rounded px-3 h-8 text-xs text-inherit placeholder:opacity-60 focus:outline-none focus:ring-1 focus:ring-black/20 font-mono min-w-[120px] flex-1 max-w-[200px]"
+                              />
+                            )
+                          )}
+
+                          {newFilterField && (
+                            <Button 
+                              onClick={handleAddFilter} 
+                              disabled={!newFilterField || (currentSchema[newFilterField] !== 'boolean' && !newFilterValue)}
+                              className="bg-black/80 hover:bg-black/95 text-[#eae6df] text-xs h-8 px-3.5 font-bold transition-all ml-auto md:ml-0"
+                            >
+                              Add
+                            </Button>
+                          )}
                         </div>
                       </div>
                     )}
