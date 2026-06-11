@@ -78,6 +78,9 @@ class RenameCollectionRequest(BaseModel):
 class MoveItemRequest(BaseModel):
     collection_name: str = Field(..., min_length=1)
 
+class UpdateCollectionColorRequest(BaseModel):
+    color: str = Field(..., min_length=4, max_length=7)
+
 
 @app.get("/")
 def read_root():
@@ -141,7 +144,7 @@ def list_models(authorization: Optional[str] = Header(None)):
     if authorization and authorization.startswith("Bearer "):
         token = authorization.split(" ")[1]
         user = database.get_user_by_token(token)
-    
+        
     gemini_key = None
     if user:
         gemini_key = user.get("gemini_api_key")
@@ -227,8 +230,22 @@ def list_models(authorization: Optional[str] = Header(None)):
 # --- Collections & Items Endpoints ---
 @app.get("/api/collections")
 def list_collections(current_user: dict = Depends(get_current_user)):
-    collections = database.get_collections_list(str(current_user["_id"]))
-    return {"collections": collections}
+    user_id = str(current_user["_id"])
+    collections = database.get_collections_list(user_id)
+    details = database.get_collections_details(user_id)
+    return {"collections": collections, "details": details}
+
+@app.put("/api/collections/{collection_name}/color")
+def update_collection_color(
+    collection_name: str,
+    payload: UpdateCollectionColorRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    user_id = str(current_user["_id"])
+    success = database.update_collection_color(user_id, collection_name, payload.color)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to update collection color.")
+    return {"success": True, "collection_name": collection_name, "color": payload.color}
 
 @app.get("/api/collections/{collection_name}/items")
 def get_collection_items(
@@ -502,7 +519,8 @@ def execute_parser(request: ExecutionRequest, authorization: Optional[str] = Hea
             # Invoke AgenticCatalogSDK to run bulk_upsert internally if desired
             sdk_class = local_namespace.get("AgenticCatalogSDK")
             if not sdk_class:
-                from sdk_blueprint import AgenticCatalogSDK as fallback_sdk_class
+                from sdk_blueprint import \
+                    AgenticCatalogSDK as fallback_sdk_class
                 sdk_class = fallback_sdk_class
                 print("ℹ️ [Sandbox] AgenticCatalogSDK not found in generated script namespace. Using system fallback SDK class.")
 

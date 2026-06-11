@@ -217,7 +217,10 @@ def extract_items(html_content: str, base_url: str = "https://example.com/store"
         with patch("database.create_collection") as mock_create_col, \
              patch("database.rename_collection") as mock_rename_col, \
              patch("database.delete_collection") as mock_delete_col, \
-             patch("database.move_item_to_collection") as mock_move_item:
+             patch("database.move_item_to_collection") as mock_move_item, \
+             patch("database.get_collections_list") as mock_list_cols, \
+             patch("database.get_collections_details") as mock_get_details, \
+             patch("database.update_collection_color") as mock_update_color:
             
             # Test POST /api/collections
             mock_create_col.return_value = True
@@ -226,6 +229,24 @@ def extract_items(html_content: str, base_url: str = "https://example.com/store"
             assert r_col_create.json()["success"] is True
             assert r_col_create.json()["name"] == "New Cool Collection"
             mock_create_col.assert_called_once_with(str(mock_get_user.return_value["_id"]), "New Cool Collection")
+
+            # Test GET /api/collections (including details)
+            mock_list_cols.return_value = ["Col A", "Col B"]
+            mock_get_details.return_value = [{"name": "Col A", "color": "#55614e"}, {"name": "Col B", "color": None}]
+            r_col_list = client.get("/api/collections", headers=headers)
+            assert r_col_list.status_code == 200
+            res_col_list = r_col_list.json()
+            assert res_col_list["collections"] == ["Col A", "Col B"]
+            assert res_col_list["details"] == [{"name": "Col A", "color": "#55614e"}, {"name": "Col B", "color": None}]
+
+            # Test PUT /api/collections/{collection_name}/color
+            mock_update_color.return_value = True
+            r_col_color = client.put("/api/collections/Col%20A/color", json={"color": "#55614e"}, headers=headers)
+            assert r_col_color.status_code == 200
+            assert r_col_color.json()["success"] is True
+            assert r_col_color.json()["collection_name"] == "Col A"
+            assert r_col_color.json()["color"] == "#55614e"
+            mock_update_color.assert_called_once_with(str(mock_get_user.return_value["_id"]), "Col A", "#55614e")
 
             # Test PUT /api/collections/{collection_name}
             mock_rename_col.return_value = True

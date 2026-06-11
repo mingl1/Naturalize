@@ -462,3 +462,52 @@ Do NOT include any explanations, markdown code blocks, backticks, or text other 
             
     scored_items.sort(key=lambda x: x[0], reverse=True)
     return [x[1] for x in scored_items]
+
+def get_collections_details(user_id: str) -> list:
+    """
+    Returns collection details (name, color, etc.) for all collections of the user.
+    """
+    db = _get_db()
+    u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+    
+    # 1. Get all collection names first
+    all_names = get_collections_list(user_id)
+    
+    # 2. Fetch existing custom collections documents
+    custom_docs = list(db.collections.find({"user_id": u_id}))
+    docs_by_name = {doc["name"]: doc for doc in custom_docs}
+    
+    details = []
+    for name in all_names:
+        doc = docs_by_name.get(name)
+        color = doc.get("color") if doc else None
+        
+        details.append({
+            "name": name,
+            "color": color
+        })
+    return details
+
+def update_collection_color(user_id: str, name: str, color: str) -> bool:
+    """
+    Updates or sets the color of a collection. If the collection doc doesn't exist yet,
+    we create it with the specified color.
+    """
+    db = _get_db()
+    u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+    
+    db.collections.update_one(
+        {"user_id": u_id, "name": name},
+        {
+            "$set": {
+                "color": color,
+                "updated_at": datetime.datetime.utcnow()
+            },
+            "$setOnInsert": {
+                "created_at": datetime.datetime.utcnow()
+            }
+        },
+        upsert=True
+    )
+    return True
+

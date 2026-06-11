@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import {
   Leaf,
-  Folder,
+  Folder as FolderIcon,
   Search,
   Plus,
   RotateCw,
@@ -36,19 +36,92 @@ import {
   Database,
   FolderPlus,
   Edit,
-  Trash2
+  Trash2,
+  Palette
 } from 'lucide-react';
 
 const API_BASE = "http://127.0.0.1:8000";
 
 // Colors and styles matching the AI OS folder mockup
 const FOLDER_THEMES = [
-  { bg: 'bg-[#eae6df] text-[#181715]', badgeBg: 'bg-black/10 text-[#181715]', hex: '#eae6df' },
-  { bg: 'bg-[#d6b885] text-[#181715]', badgeBg: 'bg-black/10 text-[#181715]', hex: '#d6b885' },
-  { bg: 'bg-[#181715] text-[#eae6df] border-zinc-800', badgeBg: 'bg-white/10 text-[#eae6df]', hex: '#181715' },
-  { bg: 'bg-[#55614e] text-[#eae6df]', badgeBg: 'bg-white/10 text-[#eae6df]', hex: '#55614e' },
-  { bg: 'bg-[#ad765c] text-[#eae6df]', badgeBg: 'bg-white/10 text-[#eae6df]', hex: '#ad765c' },
+  { bg: 'bg-[#eae6df] text-[#181715]', badgeBg: 'bg-black/10 text-[#181715]', hex: '#eae6df', textHex: '#181715' },
+  { bg: 'bg-[#d6b885] text-[#181715]', badgeBg: 'bg-black/10 text-[#181715]', hex: '#d6b885', textHex: '#181715' },
+  { bg: 'bg-[#181715] text-[#eae6df] border-zinc-800', badgeBg: 'bg-white/10 text-[#eae6df]', hex: '#181715', textHex: '#eae6df' },
+  { bg: 'bg-[#55614e] text-[#eae6df]', badgeBg: 'bg-white/10 text-[#eae6df]', hex: '#55614e', textHex: '#eae6df' },
+  { bg: 'bg-[#ad765c] text-[#eae6df]', badgeBg: 'bg-white/10 text-[#eae6df]', hex: '#ad765c', textHex: '#eae6df' },
 ];
+
+// Base Folder Component with customizable height and tabX offset
+const Folder = ({ 
+  height, 
+  tabX, 
+  backgroundColor, 
+  textColor, 
+  isActive, 
+  index, 
+  onClick, 
+  label, 
+  count, 
+  isLight,
+  bodyZ,
+  tabZ,
+  children 
+}) => {
+
+  return (
+    <>
+      {/* Folder Tab */}
+      <div 
+        onClick={onClick}
+        className={`folder-tab-container ${isActive ? 'active' : ''} pointer-events-auto`}
+        style={{
+          left: tabX,
+          bottom: height, // sits right on top of the card body
+          zIndex: tabZ,
+          position: 'absolute'
+        }}
+      >
+        <div 
+          className="folder-tab-trapezoid font-semibold"
+          style={{
+            backgroundColor,
+            color: textColor
+          }}
+        >
+          <div 
+            className="folder-index-badge"
+            style={{
+              backgroundColor: isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.12)'
+            }}
+          >
+            {index === 0 ? '00' : index.toString().padStart(2, '0')}
+          </div>
+          <span className="max-w-[120px] truncate">{label}</span>
+          <span className="text-[10px] opacity-75 font-mono font-bold">({count})</span>
+        </div>
+      </div>
+
+      {/* Folder Body Card */}
+      <div 
+        className={`folder-body-card flex flex-col transition-all duration-300 pointer-events-auto ${
+          isActive ? 'opacity-100 visible shadow-2xl' : 'opacity-100 visible'
+        } ${isLight ? 'text-zinc-900 border-zinc-900/10' : 'text-[#f5f2eb] border-white/5'}`}
+        style={{
+          height,
+          backgroundColor,
+          color: textColor,
+          width: '100%',
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          zIndex: bodyZ
+        }}
+      >
+        {isActive ? children : null}
+      </div>
+    </>
+  );
+};
 
 function App() {
   // Authentication State
@@ -63,6 +136,7 @@ function App() {
 
   // Dashboard Data State
   const [collections, setCollections] = useState([]);
+  const [folderStack, setFolderStack] = useState([]);
   const [activeCollection, setActiveCollection] = useState('');
   const [activeTab, setActiveTab] = useState('grid'); // 'grid' or 'details'
   
@@ -81,6 +155,11 @@ function App() {
 
   const [deleteCollectionOpen, setDeleteCollectionOpen] = useState(false);
   const [targetCollectionToDelete, setTargetCollectionToDelete] = useState('');
+
+  const [collectionDetails, setCollectionDetails] = useState([]);
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [targetCollectionForColor, setTargetCollectionForColor] = useState('');
+  const [selectedColor, setSelectedColor] = useState('#eae6df');
 
   // Search state
   const [searchOpen, setSearchOpen] = useState(false);
@@ -156,6 +235,7 @@ function App() {
         if (activeCollection === targetCollectionToRename) {
           setActiveCollection(renamedCollectionName.trim());
         }
+        setFolderStack(prev => prev.map(c => c === targetCollectionToRename ? renamedCollectionName.trim() : c));
         
         setRenamedCollectionName('');
         setTargetCollectionToRename('');
@@ -186,6 +266,7 @@ function App() {
           setActiveCollection('');
           setActiveTab('grid');
         }
+        setFolderStack(prev => prev.filter(c => c !== targetCollectionToDelete));
         
         setTargetCollectionToDelete('');
         setDeleteCollectionOpen(false);
@@ -193,6 +274,42 @@ function App() {
       } else {
         const data = await res.json();
         triggerToast(data.detail || 'Failed to delete collection', "Error");
+      }
+    } catch (err) {
+      triggerToast('Could not connect to backend service.', "Error");
+    }
+  };
+
+  const isColorLight = (hex) => {
+    if (!hex) return true;
+    const c = hex.substring(1);      // strip #
+    const rgb = parseInt(c, 16);   // convert rrggbb to decimal
+    if (isNaN(rgb)) return true;
+    const r = (rgb >> 16) & 0xff;
+    const g = (rgb >> 8) & 0xff;
+    const b = (rgb >> 0) & 0xff;
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return luma > 128;
+  };
+
+  const handleSaveColor = async () => {
+    if (!targetCollectionForColor || !user) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/collections/${encodeURIComponent(targetCollectionForColor)}/color`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({ color: selectedColor })
+      });
+      if (res.ok) {
+        triggerToast(`Color for folder "${targetCollectionForColor}" updated successfully.`, "Folder Color Updated");
+        setColorPickerOpen(false);
+        fetchCollections();
+      } else {
+        const data = await res.json();
+        triggerToast(data.detail || 'Failed to update folder color', "Error");
       }
     } catch (err) {
       triggerToast('Could not connect to backend service.', "Error");
@@ -233,14 +350,12 @@ function App() {
     }
   };
 
-  // Capitalize name
   const getCleanDomainName = (domain) => {
     if (domain === 'Unknown Source') return 'Unknown';
     const part = domain.split('.')[0];
     return part.charAt(0).toUpperCase() + part.slice(1);
   };
 
-  // Fetch collections when user is authenticated
   const fetchCollections = async (token = user?.token) => {
     if (!token) return;
     try {
@@ -251,8 +366,7 @@ function App() {
         const data = await res.json();
         const list = data.collections || [];
         setCollections(list);
-        
-        // Fetch items for all collections to construct Bento box sizes
+        setCollectionDetails(data.details || []);
         fetchAllCollectionsItems(list, token);
       }
     } catch (err) {
@@ -272,8 +386,6 @@ function App() {
         if (res.ok) {
           const resData = await res.json();
           const items = resData.items || [];
-          
-          // Group by website/domain
           const websitesMap = {};
           items.forEach(item => {
             const domain = getDomain(item.source_url);
@@ -282,8 +394,6 @@ function App() {
             }
             websitesMap[domain].count += 1;
           });
-
-          // Convert to sorted array
           const websites = Object.values(websitesMap).sort((a, b) => b.count - a.count);
           dataMap[col] = { items, websites };
         }
@@ -296,7 +406,6 @@ function App() {
     }
   };
 
-  // Refetches items for active collection specifically
   const refreshActiveCollectionItems = async () => {
     if (!activeCollection || !user?.token) return;
     try {
@@ -306,8 +415,6 @@ function App() {
       if (res.ok) {
         const resData = await res.json();
         const items = resData.items || [];
-        
-        // Group by website/domain
         const websitesMap = {};
         items.forEach(item => {
           const domain = getDomain(item.source_url);
@@ -316,9 +423,7 @@ function App() {
           }
           websitesMap[domain].count += 1;
         });
-
         const websites = Object.values(websitesMap).sort((a, b) => b.count - a.count);
-        
         setCollectionsItems(prev => ({
           ...prev,
           [activeCollection]: { items, websites }
@@ -330,7 +435,6 @@ function App() {
     }
   };
 
-  // Fetch available models list from backend
   const fetchAvailableModels = async (token = user?.token) => {
     if (!token) return;
     setIsLoadingModels(true);
@@ -360,7 +464,6 @@ function App() {
     }
   };
 
-  // Initialize data on mount
   useEffect(() => {
     if (user) {
       fetchCollections();
@@ -371,16 +474,30 @@ function App() {
     }
   }, [user]);
 
-  // Handlers for Authentication
+  useEffect(() => {
+    setFolderStack(prev => {
+      const filtered = prev.filter(c => collections.includes(c));
+      const added = collections.filter(c => !filtered.includes(c));
+      return [...filtered, ...added];
+    });
+  }, [collections]);
+
+  useEffect(() => {
+    if (activeTab === 'details' && activeCollection) {
+      setFolderStack(prev => {
+        const filtered = prev.filter(c => c !== activeCollection);
+        return [activeCollection, ...filtered];
+      });
+    }
+  }, [activeCollection, activeTab]);
+
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setAuthError('');
-
     if (!usernameInput.trim() || !passwordInput.trim()) {
       setAuthError('Please fill in all fields.');
       return;
     }
-
     const endpoint = isLoginView ? 'login' : 'register';
     try {
       const res = await fetch(`${API_BASE}/api/auth/${endpoint}`, {
@@ -388,13 +505,11 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: usernameInput, password: passwordInput })
       });
-
       const data = await res.json();
       if (!res.ok) {
         setAuthError(data.detail || 'Authentication failed.');
         return;
       }
-
       const userSession = {
         user_id: data.user_id,
         username: data.username,
@@ -404,7 +519,6 @@ function App() {
         validator_model: data.validator_model || 'gemini-3.5-flash',
         search_model: data.search_model || 'gemini-3.5-flash'
       };
-      
       localStorage.setItem('ag_user', JSON.stringify(userSession));
       setUser(userSession);
       setGeminiKeyInput(userSession.gemini_api_key);
@@ -434,7 +548,6 @@ function App() {
     triggerToast('Logged out successfully.', "Authentication");
   };
 
-  // Handlers for Settings
   const handleSaveSettings = async () => {
     if (!user) return;
     try {
@@ -451,7 +564,6 @@ function App() {
           search_model: searchModel
         })
       });
-
       if (res.ok) {
         const updatedUser = {
           ...user,
@@ -480,13 +592,11 @@ function App() {
     triggerToast('Token copied to clipboard!', "Success");
   };
 
-  // Semantic/Keyword Search Handler
   const handleSearchSubmit = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim() || !user) return;
     setIsSearching(true);
     setSearchResults([]);
-    
     try {
       const res = await fetch(`${API_BASE}/api/collections/search`, {
         method: 'POST',
@@ -499,7 +609,6 @@ function App() {
           collection_name: activeTab === 'details' ? activeCollection : undefined
         })
       });
-
       if (res.ok) {
         const data = await res.json();
         setSearchResults(data.items || []);
@@ -515,23 +624,18 @@ function App() {
     }
   };
 
-  // Mock Scrape ID trigger
   const handleScrapeSubmit = (e) => {
     e.preventDefault();
     if (!scrapeIdInput.trim()) return;
-    
     const targetId = scrapeIdInput.trim();
     setScrapeIdInput('');
     setScrapeOpen(false);
-    
     triggerToast(`Connecting to scrape node [${targetId}]...`, "Scraper Hub");
-    
-    // Trigger a mock scrape progress and notify
     setTimeout(() => {
       triggerToast(`Extracting grid selectors from target engine...`, "Scraper Hub");
       setTimeout(() => {
         triggerToast(`Successfully ingested and compiled new catalog items into database!`, "Scraper Hub");
-        fetchCollections(); // Refresh
+        fetchCollections();
       }, 2000);
     }, 1500);
   };
@@ -546,37 +650,29 @@ function App() {
     }
   };
 
-  // Dynamic Bento sizes based on website density/count
   const getBentoLayoutClasses = (index, total) => {
-    if (total === 1) {
-      return "col-span-3 row-span-2";
-    } else if (total === 2) {
-      return index === 0 ? "col-span-2 row-span-2" : "col-span-1 row-span-2";
-    } else if (total === 3) {
+    if (total === 1) return "col-span-3 row-span-2";
+    if (total === 2) return index === 0 ? "col-span-2 row-span-2" : "col-span-1 row-span-2";
+    if (total === 3) {
       if (index === 0) return "col-span-2 row-span-2";
       if (index === 1) return "col-span-1 row-span-1";
       return "col-span-1 row-span-1";
-    } else {
-      // 4 or more
-      if (index === 0) return "col-span-2 row-span-2";
-      if (index === 1) return "col-span-1 row-span-1";
-      if (index === 2) return "col-span-1 row-span-1";
-      return "col-span-3 row-span-1";
     }
+    if (index === 0) return "col-span-2 row-span-2";
+    if (index === 1) return "col-span-1 row-span-1";
+    if (index === 2) return "col-span-1 row-span-1";
+    return "col-span-3 row-span-1";
   };
 
-  // Active collection detail item list
   const activeItems = useMemo(() => {
     if (!activeCollection || !collectionsItems[activeCollection]) return [];
     const rawItems = collectionsItems[activeCollection].items || [];
-    
-    if (selectedWebsiteFilter) {
+    if (selectedWebsiteFilter && selectedWebsiteFilter !== 'none_filter_value') {
       return rawItems.filter(item => getDomain(item.source_url) === selectedWebsiteFilter);
     }
     return rawItems;
   }, [activeCollection, collectionsItems, selectedWebsiteFilter]);
 
-  // Compute total file count across all folders
   const totalFileCount = useMemo(() => {
     let sum = 0;
     Object.values(collectionsItems).forEach(col => {
@@ -585,11 +681,37 @@ function App() {
     return sum;
   }, [collectionsItems]);
 
+  const chunkedTabs = useMemo(() => {
+    const allTabs = [
+      { id: 'all', name: 'All Folders', count: totalFileCount, isAll: true, theme: { bg: 'bg-[#eae6df] text-[#181715]', hex: '#eae6df', textHex: '#181715' } }
+    ];
+    collections.forEach((col, idx) => {
+      const colData = collectionsItems[col];
+      const count = colData ? colData.items?.length : 0;
+      
+      const detail = collectionDetails.find(d => d.name === col);
+      let hex = detail?.color;
+      let theme;
+      if (hex) {
+        const isLight = isColorLight(hex);
+        theme = {
+          bg: isLight ? `bg-[${hex}] text-[#181715]` : `bg-[${hex}] text-[#eae6df]`,
+          hex,
+          textHex: isLight ? '#181715' : '#eae6df'
+        };
+      } else {
+        theme = FOLDER_THEMES[idx % FOLDER_THEMES.length];
+      }
+      
+      allTabs.push({ id: col, name: col, count, isAll: false, theme });
+    });
+    return allTabs;
+  }, [collections, collectionsItems, totalFileCount, collectionDetails]);
+
   return (
     <div className="min-h-screen flex flex-col bg-[#181715] text-[#f5f2eb] font-body selection:bg-primary/30">
       <Toaster />
 
-      {/* Auth Wrapper */}
       {!user ? (
         <div className="flex-1 flex items-center justify-center p-6 bg-[radial-gradient(circle_at_top,#23221f_0%,#181715_70%)]">
           <div className="w-full max-w-[420px] bg-[#22201d] border border-white/5 rounded-2xl shadow-2xl p-8 transition-all duration-300 hover:border-[#8c9c86]/20">
@@ -602,71 +724,41 @@ function App() {
                 {isLoginView ? 'Login to your visual extraction dashboard' : 'Create an extraction account'}
               </p>
             </div>
-
             {authError && (
               <div className="bg-[#c99377]/10 border border-[#c99377]/20 text-[#c99377] rounded-md p-3 text-sm mb-5">
                 {authError}
               </div>
             )}
-
             <form onSubmit={handleAuthSubmit} className="space-y-4">
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wider text-[#a39b90]">Username</label>
-                <Input
-                  type="text"
-                  placeholder="e.g. scraper_pro"
-                  value={usernameInput}
-                  onChange={(e) => setUsernameInput(e.target.value)}
-                  className="bg-[#12110f] border-white/5 focus:border-[#8c9c86] focus:ring-[#8c9c86]/20"
-                />
+                <Input type="text" placeholder="e.g. scraper_pro" value={usernameInput} onChange={(e) => setUsernameInput(e.target.value)} className="bg-[#12110f] border-white/5 focus:border-[#8c9c86] focus:ring-[#8c9c86]/20" />
               </div>
-
               <div className="space-y-2">
                 <label className="text-xs font-semibold uppercase tracking-wider text-[#a39b90]">Password</label>
-                <Input
-                  type="password"
-                  placeholder="••••••••"
-                  value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
-                  className="bg-[#12110f] border-white/5 focus:border-[#8c9c86] focus:ring-[#8c9c86]/20"
-                />
+                <Input type="password" placeholder="••••••••" value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} className="bg-[#12110f] border-white/5 focus:border-[#8c9c86] focus:ring-[#8c9c86]/20" />
               </div>
-
               <Button type="submit" className="w-full bg-[#96a68f] hover:bg-[#a9b9a2] text-[#181715] font-semibold py-2.5 mt-2 transition-all duration-200">
                 {isLoginView ? 'Sign In' : 'Sign Up'}
               </Button>
             </form>
-
             <div className="justify-center pt-4 border-t border-white/5 mt-6 flex text-sm text-[#a39b90]">
               {isLoginView ? (
                 <>
                   Don't have an account?{' '}
-                  <span
-                    onClick={() => { setIsLoginView(false); setAuthError(''); }}
-                    className="text-[#d4c2ab] hover:underline cursor-pointer font-medium ml-1"
-                  >
-                    Sign up
-                  </span>
+                  <span onClick={() => { setIsLoginView(false); setAuthError(''); }} className="text-[#d4c2ab] hover:underline cursor-pointer font-medium ml-1">Sign up</span>
                 </>
               ) : (
                 <>
                   Already have an account?{' '}
-                  <span
-                    onClick={() => { setIsLoginView(true); setAuthError(''); }}
-                    className="text-[#d4c2ab] hover:underline cursor-pointer font-medium ml-1"
-                  >
-                    Sign in
-                  </span>
+                  <span onClick={() => { setIsLoginView(true); setAuthError(''); }} className="text-[#d4c2ab] hover:underline cursor-pointer font-medium ml-1">Sign in</span>
                 </>
               )}
             </div>
           </div>
         </div>
       ) : (
-        /* Reimagined Folders Dashboard Workspace */
         <div className="flex-1 flex flex-col grid-paper min-h-screen relative overflow-x-hidden p-6 md:p-10 select-none">
-          
-          {/* Header Area */}
           <header className="w-full max-w-[1000px] mx-auto mb-8 flex items-center justify-between z-10">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-[#181715] border border-white/10 flex items-center justify-center text-[#d4c2ab]">
@@ -677,461 +769,274 @@ function App() {
                 <p className="text-[10px] text-zinc-800 uppercase tracking-widest font-semibold">Visual Data Folders</p>
               </div>
             </div>
-
             <div className="flex items-center gap-2">
               <div className="text-right hidden sm:block mr-2">
                 <p className="text-xs font-semibold text-zinc-900">{user.username}</p>
                 <p className="text-[10px] text-zinc-700">Workspace Active</p>
               </div>
-              <Button
-                variant="outline"
-                size="icon"
-                className="w-10 h-10 rounded-full border-zinc-300 bg-[#181715] text-[#f5f2eb] hover:bg-[#292723]"
-                onClick={handleOpenSettings}
-                title="System Settings"
-              >
+              <Button variant="outline" size="icon" className="w-10 h-10 rounded-full border-zinc-300 bg-[#181715] text-[#f5f2eb] hover:bg-[#292723]" onClick={handleOpenSettings} title="System Settings">
                 <Settings className="w-4 h-4" />
               </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="w-10 h-10 rounded-full border-zinc-300 bg-[#181715] text-[#c99377] hover:bg-[#292723]"
-                onClick={handleLogout}
-                title="Log Out"
-              >
+              <Button variant="outline" size="icon" className="w-10 h-10 rounded-full border-zinc-300 bg-[#181715] text-[#c99377] hover:bg-[#292723]" onClick={handleLogout} title="Log Out">
                 <LogOut className="w-4 h-4" />
               </Button>
             </div>
           </header>
 
-          {/* BACKGROUND DECORATIONS (mocking the image design elements) */}
-          <div className="absolute top-28 left-6 md:left-20 pointer-events-none hidden xl:block opacity-75">
-            <div className="retro-dial"></div>
-            <p className="text-[10px] font-mono text-zinc-800 mt-2 text-center">UI DESIGN PLACE</p>
-          </div>
-          <div className="absolute top-28 right-6 md:right-20 pointer-events-none hidden xl:block opacity-75">
-            <div className="retro-dial"></div>
-            <p className="text-[10px] font-mono text-zinc-800 mt-2 text-center">FOLDERS CONTROLS</p>
-          </div>
-          
-          {/* Scattered numbers on gridpaper matching mockup style */}
           <div className="absolute top-72 left-24 font-title text-5xl font-extrabold text-zinc-800/15 pointer-events-none hidden lg:block">8</div>
           <div className="absolute top-96 left-80 font-title text-4xl font-extrabold text-zinc-800/15 pointer-events-none hidden lg:block">7</div>
           <div className="absolute top-64 right-96 font-title text-3xl font-extrabold text-zinc-800/15 pointer-events-none hidden lg:block">3</div>
           <div className="absolute top-96 right-40 font-title text-5xl font-extrabold text-zinc-800/15 pointer-events-none hidden lg:block">6</div>
 
-          {/* MAIN FOLDER CARD COMPONENT */}
-          <div className="flex-1 flex items-center justify-center py-4 z-10">
-            <div className="folder-wrapper">
-              
-              {/* Overlapping index card tabs */}
-              <div className="folder-tabs-row">
-                <div 
-                  onClick={() => { setActiveTab('grid'); setSelectedWebsiteFilter(''); }}
-                  className={`folder-tab tab-white ${activeTab === 'grid' ? 'active' : ''}`}
-                >
-                  <div className="folder-index-badge">00</div>
-                  <span>All Folders</span>
-                </div>
-
-                {collections.map((col, idx) => {
-                  const theme = FOLDER_THEMES[idx % FOLDER_THEMES.length];
-                  const colData = collectionsItems[col];
-                  const count = colData ? colData.items?.length : '..';
+          <div className="flex-1 flex flex-col items-center py-4 z-10 w-full">
+            <div className="folders-cabinet relative w-full max-w-[1000px] flex-1 mx-auto">
+              {chunkedTabs.map((tab, idx) => {
+                const isActive = tab.isAll ? activeTab === 'grid' : (activeTab === 'details' && activeCollection === tab.id);
+                const isLight = tab.theme.textHex === '#181715';
+                
+                // Calculate folder heights and stack z-indexes using folderStack sequence
+                let folderHeightVal;
+                let bodyZ;
+                let tabZ;
+                
+                if (activeTab === 'grid') {
+                  folderHeightVal = Math.max(70, 100 - idx * 4);
+                  bodyZ = isActive ? 100 : 10 + idx;
+                  tabZ = isActive ? 120 : 30 + idx;
+                } else {
+                  let slotIdx;
+                  if (tab.isAll) {
+                    slotIdx = collections.length;
+                  } else {
+                    slotIdx = folderStack.indexOf(tab.id);
+                    if (slotIdx === -1) {
+                      slotIdx = collections.indexOf(tab.id);
+                    }
+                    if (slotIdx === -1) {
+                      slotIdx = idx;
+                    }
+                  }
                   
-                  return (
-                    <div
-                      key={col}
-                      onClick={() => {
-                        setActiveCollection(col);
+                  // Active is slot 0 (75% height), and other folders stack taller behind it (up to 100%)
+                  folderHeightVal = Math.min(100, 75 + slotIdx * 4);
+                  
+                  // Stacking z-indexes decrease sequentially as we move back in the stack
+                  bodyZ = 100 - slotIdx * 5;
+                  tabZ = 120 - slotIdx * 5;
+                }
+                
+                const folderHeight = `${folderHeightVal}%`;
+                const tabX = `${10 + (idx * 16) % 75}%`;
+                return (
+                  <Folder
+                    key={tab.id}
+                    height={folderHeight}
+                    tabX={tabX}
+                    backgroundColor={tab.theme.hex}
+                    textColor={tab.theme.textHex}
+                    isActive={isActive}
+                    index={idx}
+                    bodyZ={bodyZ}
+                    tabZ={tabZ}
+                    onClick={() => {
+                      if (tab.isAll) {
+                        setActiveTab('grid');
+                        setSelectedWebsiteFilter('');
+                      } else {
+                        setActiveCollection(tab.id);
                         setSelectedWebsiteFilter('');
                         setActiveTab('details');
-                      }}
-                      className={`folder-tab ${theme.bg} ${activeTab === 'details' && activeCollection === col ? 'active' : ''}`}
-                    >
-                      <div className="folder-index-badge">{(idx + 1).toString().padStart(2, '0')}</div>
-                      <span className="max-w-[120px] truncate">{col}</span>
-                      <span className="text-[10px] opacity-70">({count})</span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Folder container body card */}
-              <div className={`folder-body-card ${activeTab === 'details' ? FOLDER_THEMES[collections.indexOf(activeCollection) % FOLDER_THEMES.length].bg : 'bg-[#181715] text-[#f5f2eb] border-white/5'}`}>
-                
-                {/* Search Results Display Overlay */}
-                {searchResults !== null && (
-                  <div className="absolute inset-0 bg-[#181715] text-[#f5f2eb] p-8 overflow-y-auto z-30 fade-in">
-                    <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
-                      <div className="flex items-center gap-2">
-                        <Search className="w-5 h-5 text-[#96a68f]" />
-                        <h2 className="text-xl font-bold font-title">Semantic Search Matches</h2>
-                        <span className="text-xs bg-white/10 px-2 py-0.5 rounded-full text-[#a39b90]">
-                          "{searchQuery}"
-                        </span>
-                      </div>
-                      <button 
-                        onClick={() => { setSearchResults(null); setSearchQuery(''); }}
-                        className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {searchResults.length === 0 ? (
-                      <div className="text-center py-20 text-[#a39b90]">
-                        <p className="text-lg font-semibold mb-2">No matching items found</p>
-                        <p className="text-sm">Try running queries like "price under 100" or typing alternative keywords.</p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {searchResults.map(item => (
-                          <div key={item._id} className="bg-[#22201d] border border-white/5 rounded-xl p-4 flex flex-col justify-between hover:border-[#8c9c86]/30 transition-all">
-                            <div>
-                              <div className="flex justify-between items-start gap-4 mb-2">
-                                <h4 className="font-semibold text-sm line-clamp-2 text-[#f5f2eb]">{item.title}</h4>
-                                <span className="font-title text-base font-bold text-[#cca678]">${item.price?.toFixed(2)}</span>
-                              </div>
-                              <span className="text-[10px] bg-white/5 border border-white/10 text-[#a39b90] px-2 py-0.5 rounded-sm uppercase tracking-wider font-semibold">
-                                {getCleanDomainName(getDomain(item.source_url))}
-                              </span>
-                            </div>
-                            <div className="mt-4 pt-3 border-t border-dashed border-white/10 flex items-center justify-between text-xs">
-                              <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="text-[#96a68f] hover:underline flex items-center gap-1">
-                                <ExternalLink className="w-3 h-3" /> View Source
-                              </a>
-                              <span className="text-[10px] text-[#a39b90]">Collection: {item.collection_name}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* VIEW 1: FOLDERS OVERVIEW GRID */}
-                {activeTab === 'grid' && (
-                  <div className="fade-in">
-                    <div className="flex justify-between items-center mb-6">
-                      <div>
-                        <h2 className="text-2xl font-bold font-title">Catalog Folders</h2>
-                        <p className="text-xs text-[#a39b90]">Select a folder to browse captured listing data grids</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="border-white/10 bg-white/5 hover:bg-white/10 text-xs gap-2 text-[#96a68f]"
-                          onClick={() => setCreateCollectionOpen(true)}
-                        >
-                          <FolderPlus className="w-3.5 h-3.5" /> New Folder
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="border-white/10 bg-white/5 hover:bg-white/10 text-xs gap-2"
-                          onClick={() => fetchCollections()}
-                        >
-                          <RotateCw className="w-3.5 h-3.5" /> Refresh
-                        </Button>
-                      </div>
-                    </div>
-
-                    {isLoadingItems && collections.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-20 text-[#a39b90]">
-                        <RotateCw className="w-8 h-8 animate-spin mb-4 text-[#96a68f]" />
-                        <p>Syncing catalog databases...</p>
-                      </div>
-                    ) : collections.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-20 text-center text-[#a39b90]">
-                        <Database className="w-12 h-12 mb-4 text-[#96a68f]" />
-                        <h3 className="text-[#f5f2eb] text-lg font-semibold mb-2">No folders captured yet</h3>
-                        <p className="text-sm max-w-sm">
-                          Use the chrome extension on visual listing grids to auto-generate BeautifulSoup parser scripts and populate your folders.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        {collections.map((col, idx) => {
-                          const colData = collectionsItems[col];
-                          const itemsCount = colData ? colData.items?.length : 0;
-                          const websites = colData ? colData.websites : [];
-                          const theme = FOLDER_THEMES[idx % FOLDER_THEMES.length];
-
-                          return (
-                            <div 
-                              key={col}
-                              className="bg-[#22201d] border border-white/5 rounded-2xl p-5 flex flex-col justify-between hover:border-[#8c9c86]/30 transition-all duration-300 group shadow-md"
-                            >
-                              <div>
-                                <div className="flex items-center justify-between mb-4">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <Folder className="w-5 h-5 text-[#96a68f] flex-shrink-0" />
-                                    <h3 className="font-bold text-lg text-[#f5f2eb] group-hover:text-[#96a68f] transition-colors truncate" title={col}>{col}</h3>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <button 
-                                      className="text-zinc-500 hover:text-[#96a68f] transition-colors p-1"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setTargetCollectionToRename(col);
-                                        setRenamedCollectionName(col);
-                                        setRenameCollectionOpen(true);
-                                      }}
-                                      title="Rename Folder"
-                                    >
-                                      <Edit className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button 
-                                      className="text-zinc-500 hover:text-red-400 transition-colors p-1"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setTargetCollectionToDelete(col);
-                                        setDeleteCollectionOpen(true);
-                                      }}
-                                      title="Delete Folder"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                    <span className="text-xs bg-white/5 border border-white/10 px-2 py-0.5 rounded-full font-semibold text-[#a39b90] whitespace-nowrap">
-                                      {itemsCount} items
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Bento Box sources preview inside folder card */}
-                                <div className="mt-3">
-                                  <p className="text-[10px] uppercase tracking-wider text-[#a39b90] mb-2 font-semibold">Web Sources Layout</p>
-                                  {websites.length === 0 ? (
-                                    <div className="h-24 bg-black/20 border border-dashed border-white/5 rounded-lg flex items-center justify-center text-xs text-[#a39b90] italic">
-                                      Empty folder content
-                                    </div>
-                                  ) : (
-                                    <div className="grid grid-cols-3 gap-2 h-28">
-                                      {websites.slice(0, 3).map((web, wIdx) => {
-                                        const bentoClass = getBentoLayoutClasses(wIdx, Math.min(websites.length, 3));
-                                        return (
-                                          <div
-                                            key={web.domain}
-                                            onClick={(e) => {
-                                              e.stopPropagation();
-                                              setActiveCollection(col);
-                                              setSelectedWebsiteFilter(web.domain);
-                                              setActiveTab('details');
-                                            }}
-                                            className={`${bentoClass} bg-black/40 border border-white/5 hover:border-[#96a68f]/40 hover:bg-black/60 rounded-lg p-2.5 flex flex-col justify-between transition-all duration-200 cursor-pointer`}
-                                          >
-                                            <div className="flex items-center gap-1.5">
-                                              <img
-                                                src={`https://www.google.com/s2/favicons?domain=${web.domain}&sz=32`}
-                                                alt={web.name}
-                                                onError={(e) => { e.target.style.display = 'none'; }}
-                                                className="w-4 h-4 rounded-sm flex-shrink-0"
-                                              />
-                                              <span className="text-xs font-semibold truncate text-[#f5f2eb]">{web.name}</span>
-                                            </div>
-                                            <span className="text-[10px] text-[#a39b90]">{web.count} files</span>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-
-                              <Button
-                                className="w-full mt-4 bg-transparent border border-white/10 text-xs text-[#f5f2eb] hover:bg-[#96a68f] hover:text-[#181715] transition-colors py-1 h-8"
-                                onClick={() => {
-                                  setActiveCollection(col);
-                                  setSelectedWebsiteFilter('');
-                                  setActiveTab('details');
-                                }}
-                              >
-                                Open Folder
-                              </Button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* VIEW 2: FOLDER DETAIL VIEW */}
-                {activeTab === 'details' && (
-                  <div className="fade-in">
-                    
-                    {/* Folder details Header */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-5 border-b border-black/10">
-                      <div className="flex items-center gap-3">
-                        <button 
-                          onClick={() => { setActiveTab('grid'); setSelectedWebsiteFilter(''); }}
-                          className="w-9 h-9 rounded-full bg-black/15 flex items-center justify-center hover:bg-black/35 transition-colors border border-black/10 text-inherit"
-                        >
-                          <ArrowLeft className="w-4 h-4" />
-                        </button>
-                        <div>
+                      }
+                    }}
+                    label={tab.name}
+                    count={tab.count}
+                    isLight={isLight}
+                  >
+                    {searchResults !== null && (
+                      <div className="absolute inset-0 bg-[#181715] text-[#f5f2eb] p-8 overflow-y-auto z-30 fade-in">
+                        <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
                           <div className="flex items-center gap-2">
-                            <Folder className="w-5 h-5 opacity-80" />
-                            <h2 className="text-xl font-bold font-title uppercase tracking-wide max-w-[200px] truncate" title={activeCollection}>{activeCollection}</h2>
-                            <button 
-                              className="opacity-60 hover:opacity-100 transition-opacity p-1 text-inherit"
-                              onClick={() => {
-                                setTargetCollectionToRename(activeCollection);
-                                setRenamedCollectionName(activeCollection);
-                                setRenameCollectionOpen(true);
-                              }}
-                              title="Rename Folder"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                            </button>
-                            <button 
-                              className="opacity-60 hover:opacity-100 hover:text-red-600 transition-all p-1 text-inherit"
-                              onClick={() => {
-                                setTargetCollectionToDelete(activeCollection);
-                                setDeleteCollectionOpen(true);
-                              }}
-                              title="Delete Folder"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <Search className="w-5 h-5 text-[#96a68f]" />
+                            <h2 className="text-xl font-bold font-title">Semantic Search Matches</h2>
+                            <span className="text-xs bg-white/10 px-2 py-0.5 rounded-full text-[#a39b90]">"{searchQuery}"</span>
                           </div>
-                          <p className="text-xs opacity-75">
-                            Showing {activeItems.length} of {(collectionsItems[activeCollection]?.items || []).length} catalog records
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        {selectedWebsiteFilter && (
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            className="text-xs hover:bg-black/10 hover:text-inherit"
-                            onClick={() => setSelectedWebsiteFilter('')}
-                          >
-                            Clear Filter
-                          </Button>
-                        )}
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="border-black/20 bg-black/10 hover:bg-black/25 text-xs gap-1.5"
-                          onClick={() => refreshActiveCollectionItems()}
-                        >
-                          <RotateCw className="w-3.5 h-3.5" /> Synchronize
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Bento filter items widget within details view */}
-                    {collectionsItems[activeCollection]?.websites?.length > 1 && (
-                      <div className="mb-6 bg-black/15 p-4 rounded-xl border border-black/5">
-                        <p className="text-[10px] uppercase font-bold tracking-wider opacity-75 mb-2.5">Filter items by Website Node</p>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={() => setSelectedWebsiteFilter('')}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${!selectedWebsiteFilter ? 'bg-[#181715] text-[#f5f2eb] border-zinc-700' : 'bg-transparent border-black/25 hover:bg-black/10 text-inherit'}`}
-                          >
-                            All Sources ({collectionsItems[activeCollection]?.items?.length})
+                          <button onClick={() => { setSearchResults(null); setSearchQuery(''); }} className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors text-inherit">
+                            <X className="w-4 h-4" />
                           </button>
-                          {collectionsItems[activeCollection].websites.map(web => (
-                            <button
-                              key={web.domain}
-                              onClick={() => setSelectedWebsiteFilter(web.domain === selectedWebsiteFilter ? '' : web.domain)}
-                              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all border flex items-center gap-1.5 ${web.domain === selectedWebsiteFilter ? 'bg-[#181715] text-[#f5f2eb] border-zinc-700' : 'bg-transparent border-black/25 hover:bg-black/10 text-inherit'}`}
-                            >
-                              <img
-                                src={`https://www.google.com/s2/favicons?domain=${web.domain}&sz=32`}
-                                alt={web.name}
-                                onError={(e) => { e.target.style.display = 'none'; }}
-                                className="w-3.5 h-3.5 rounded-sm"
-                              />
-                              {web.name} ({web.count})
-                            </button>
-                          ))}
                         </div>
+                        {searchResults.length === 0 ? (
+                          <div className="text-center py-20 text-[#a39b90]">
+                            <p className="text-lg font-semibold mb-2">No matching items found</p>
+                            <p className="text-sm">Try running queries like "price under 100" or typing alternative keywords.</p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {searchResults.map(item => (
+                              <div key={item._id} className="bg-[#22201d] border border-white/5 rounded-xl p-4 flex flex-col justify-between hover:border-[#8c9c86]/30 transition-all">
+                                <div>
+                                  <div className="flex justify-between items-start gap-4 mb-2">
+                                    <h4 className="font-semibold text-sm line-clamp-2 text-[#f5f2eb]">{item.title}</h4>
+                                    <span className="font-title text-base font-bold text-[#cca678]">${item.price?.toFixed(2)}</span>
+                                  </div>
+                                  <span className="text-[10px] bg-white/5 border border-white/10 text-[#a39b90] px-2 py-0.5 rounded-sm uppercase tracking-wider font-semibold">{getCleanDomainName(getDomain(item.source_url))}</span>
+                                </div>
+                                <div className="mt-4 pt-3 border-t border-dashed border-white/10 flex items-center justify-between text-xs">
+                                  <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="text-[#96a68f] hover:underline flex items-center gap-1"><ExternalLink className="w-3 h-3" /> View Source</a>
+                                  <span className="text-[10px] text-[#a39b90]">Collection: {item.collection_name}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
-
-                    {/* Items Grid list */}
-                    {activeItems.length === 0 ? (
-                      <div className="text-center py-20 opacity-75">
-                        <p className="text-lg font-semibold mb-1">No items found</p>
-                        <p className="text-xs">Either empty collection or mismatching filters applied.</p>
+                    {tab.isAll ? (
+                      <div className="fade-in h-full overflow-y-auto">
+                        <div className="flex justify-between items-center mb-6">
+                          <div>
+                            <h2 className="text-2xl font-bold font-title">Catalog Folders</h2>
+                            <p className="text-xs text-[#a39b90]">Select a folder to browse captured listing data grids</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" className="border-white/10 bg-white/5 hover:bg-white/10 text-xs gap-2 text-[#96a68f]" onClick={() => setCreateCollectionOpen(true)}><FolderPlus className="w-3.5 h-3.5" /> New Folder</Button>
+                            <Button variant="outline" size="sm" className="border-white/10 bg-white/5 hover:bg-white/10 text-xs gap-2" onClick={() => fetchCollections()}><RotateCw className="w-3.5 h-3.5" /> Refresh</Button>
+                          </div>
+                        </div>
+                        {isLoadingItems && collections.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-20 text-[#a39b90]">
+                            <RotateCw className="w-8 h-8 animate-spin mb-4 text-[#96a68f]" />
+                            <p>Syncing catalog databases...</p>
+                          </div>
+                        ) : collections.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-20 text-center text-[#a39b90]">
+                            <Database className="w-12 h-12 mb-4 text-[#96a68f]" />
+                            <h3 className="text-[#f5f2eb] text-lg font-semibold mb-2">No folders captured yet</h3>
+                            <p className="text-sm max-w-sm">Use the chrome extension on visual listing grids to auto-generate BeautifulSoup parser scripts and populate your folders.</p>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto max-h-[360px] pr-2">
+                            {collections.map((col, idx) => {
+                              const colData = collectionsItems[col];
+                              const itemsCount = colData ? colData.items?.length : 0;
+                              const websites = colData ? colData.websites : [];
+                              return (
+                                <div key={col} className="bg-[#22201d] border border-white/5 rounded-2xl p-5 flex flex-col justify-between hover:border-[#8c9c86]/30 transition-all duration-300 group">
+                                  <div>
+                                    <div className="flex items-center justify-between mb-4">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <FolderIcon className="w-5 h-5 text-[#96a68f] flex-shrink-0" />
+                                        <h3 className="font-bold text-lg text-[#f5f2eb] group-hover:text-[#96a68f] transition-colors truncate" title={col}>{col}</h3>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <button className="text-zinc-500 hover:text-[#96a68f] transition-colors p-1 bg-transparent border-none cursor-pointer" onClick={(e) => { e.stopPropagation(); setTargetCollectionToRename(col); setRenamedCollectionName(col); setRenameCollectionOpen(true); }} title="Rename Folder"><Edit className="w-3.5 h-3.5" /></button>
+                                        <button className="text-zinc-500 hover:text-[#96a68f] transition-colors p-1 bg-transparent border-none cursor-pointer" onClick={(e) => { e.stopPropagation(); setTargetCollectionForColor(col); const currentDetail = collectionDetails.find(d => d.name === col); setSelectedColor(currentDetail?.color || FOLDER_THEMES[idx % FOLDER_THEMES.length].hex); setColorPickerOpen(true); }} title="Folder Color"><Palette className="w-3.5 h-3.5" /></button>
+                                        <button className="text-zinc-500 hover:text-red-400 transition-colors p-1 bg-transparent border-none cursor-pointer" onClick={(e) => { e.stopPropagation(); setTargetCollectionToDelete(col); setDeleteCollectionOpen(true); }} title="Delete Folder"><Trash2 className="w-3.5 h-3.5" /></button>
+                                        <span className="text-xs bg-white/5 border border-white/10 px-2 py-0.5 rounded-full font-semibold text-[#a39b90] whitespace-nowrap">{itemsCount} items</span>
+                                      </div>
+                                    </div>
+                                    <div className="mt-3">
+                                      <p className="text-[10px] uppercase tracking-wider text-[#a39b90] mb-2 font-semibold">Web Sources Layout</p>
+                                      {websites.length === 0 ? (
+                                        <div className="h-24 bg-black/20 border border-dashed border-white/5 rounded-lg flex items-center justify-center text-xs text-[#a39b90] italic">Empty folder content</div>
+                                      ) : (
+                                        <div className="grid grid-cols-3 gap-2 h-28">
+                                          {websites.slice(0, 3).map((web, wIdx) => {
+                                            const bentoClass = getBentoLayoutClasses(wIdx, Math.min(websites.length, 3));
+                                            return (
+                                              <div key={web.domain} onClick={(e) => { e.stopPropagation(); setActiveCollection(col); setSelectedWebsiteFilter(web.domain); setActiveTab('details'); }} className={`${bentoClass} bg-black/40 border border-white/5 hover:border-[#96a68f]/40 hover:bg-black/60 rounded-lg p-2.5 flex flex-col justify-between transition-all duration-200 cursor-pointer`}>
+                                                <div className="flex items-center gap-1.5">
+                                                  <img src={`https://www.google.com/s2/favicons?domain=${web.domain}&sz=32`} alt={web.name} onError={(e) => { e.target.style.display = 'none'; }} className="w-4 h-4 rounded-sm flex-shrink-0" />
+                                                  <span className="text-xs font-semibold truncate text-[#f5f2eb]">{web.name}</span>
+                                                </div>
+                                                <span className="text-[10px] text-[#a39b90]">{web.count} files</span>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <Button className="w-full mt-4 bg-transparent border border-white/10 text-xs text-[#f5f2eb] hover:bg-[#96a68f] hover:text-[#181715] transition-colors py-1 h-8" onClick={() => { setActiveCollection(col); setSelectedWebsiteFilter(''); setActiveTab('details'); }}>Open Folder</Button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {activeItems.map(item => (
-                          <div 
-                            key={item._id} 
-                            className="bg-black/20 hover:bg-black/30 border border-black/10 rounded-xl p-4 flex flex-col justify-between transition-all duration-200"
-                          >
-                            <div className="mb-4">
-                              <div className="flex justify-between items-start gap-3 mb-2">
-                                <h3 className="font-semibold text-sm leading-snug line-clamp-2" title={item.title}>
-                                  {item.title}
-                                </h3>
-                                <span className="font-title text-base font-bold whitespace-nowrap text-[#cca678]">
-                                  {item.price > 0 ? `$${item.price.toFixed(2)}` : 'N/A'}
-                                </span>
+                      <div className="fade-in h-full flex flex-col">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 pb-4 border-b border-black/10 flex-shrink-0">
+                          <div className="flex items-center gap-3">
+                            <button onClick={() => { setActiveTab('grid'); setSelectedWebsiteFilter(''); }} className="w-8 h-8 rounded-full bg-black/20 hover:bg-black/40 flex items-center justify-center transition-colors text-inherit border-none cursor-pointer" title="Back to Folders"><ArrowLeft className="w-4 h-4" /></button>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2">
+                                <FolderIcon className="w-5 h-5 opacity-80" />
+                                <h2 className="text-xl font-bold font-title truncate max-w-[200px]" title={activeCollection}>{activeCollection}</h2>
                               </div>
-
-                              {item.metadata && Object.keys(item.metadata).length > 0 && (
-                                <div className="flex flex-wrap gap-1 mt-3">
-                                  {Object.entries(item.metadata).map(([key, val]) => {
-                                    if (key.startsWith('extracted_')) return null;
-                                    let dVal = Array.isArray(val) ? val.join(', ') : (typeof val === 'object' && val !== null ? JSON.stringify(val) : String(val));
-                                    if (!dVal || dVal.length > 40) return null;
-
-                                    return (
-                                      <span 
-                                        key={key} 
-                                        className="bg-black/15 border border-black/10 rounded-sm py-0.5 px-1.5 text-[9px] truncate max-w-full font-mono opacity-85"
-                                        title={`${key}: ${dVal}`}
-                                      >
-                                        <strong>{key}:</strong> {dVal}
-                                      </span>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex items-center justify-between pt-3 border-t border-dashed border-black/15 text-xs">
-                              <a 
-                                href={item.source_url || '#'} 
-                                target="_blank" 
-                                  rel="noopener noreferrer" 
-                                  className="font-semibold flex items-center gap-1 hover:underline text-inherit opacity-90 hover:opacity-100"
-                              >
-                                <ExternalLink className="w-3.5 h-3.5" /> View Source
-                              </a>
-                              <span className="text-[10px] opacity-75">
-                                {formatDate(item.updated_at || item.created_at)}
-                              </span>
+                              <p className="text-[10px] text-inherit/60 font-mono mt-0.5">INDEX: #{(collections.indexOf(activeCollection) + 1).toString().padStart(3, '0')} — {activeItems.length} ITEMS CAPTURED</p>
                             </div>
                           </div>
-                        ))}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {collectionsItems[activeCollection]?.websites?.length > 0 && (
+                              <Select value={selectedWebsiteFilter || 'none_filter_value'} onValueChange={setSelectedWebsiteFilter}>
+                                <SelectTrigger className="w-[160px] h-8 text-xs bg-black/25 border-none text-inherit focus:ring-0 focus:ring-offset-0">
+                                  <div className="flex items-center gap-1.5 truncate"><Globe className="w-3.5 h-3.5 opacity-75" /><SelectValue placeholder="All Domains" /></div>
+                                </SelectTrigger>
+                                <SelectContent className="bg-[#22201d] border-white/5 text-[#f5f2eb]">
+                                  <SelectItem value="none_filter_value" className="text-xs">All Domains</SelectItem>
+                                  {collectionsItems[activeCollection].websites.map(web => (
+                                    <SelectItem key={web.domain} value={web.domain} className="text-xs">{web.name} ({web.count})</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            <button className="h-8 px-2.5 rounded bg-black/20 hover:bg-black/40 transition-colors flex items-center gap-1.5 text-xs text-inherit border-none cursor-pointer" onClick={() => { setTargetCollectionToRename(activeCollection); setRenamedCollectionName(activeCollection); setRenameCollectionOpen(true); }} title="Rename Folder"><Edit className="w-3.5 h-3.5" /> Rename</button>
+                            <button className="h-8 px-2.5 rounded bg-black/20 hover:bg-black/40 transition-colors flex items-center gap-1.5 text-xs text-inherit border-none cursor-pointer" onClick={() => { setTargetCollectionForColor(activeCollection); const currentDetail = collectionDetails.find(d => d.name === activeCollection); const idx = collections.indexOf(activeCollection); setSelectedColor(currentDetail?.color || FOLDER_THEMES[idx % FOLDER_THEMES.length].hex); setColorPickerOpen(true); }} title="Folder Color"><Palette className="w-3.5 h-3.5" /> Color</button>
+                            <button className="h-8 px-2.5 rounded bg-[#c99377]/10 hover:bg-[#c99377]/25 text-[#c99377] transition-colors flex items-center gap-1.5 text-xs border-none cursor-pointer" onClick={() => { setTargetCollectionToDelete(activeCollection); setDeleteCollectionOpen(true); }} title="Delete Folder"><Trash2 className="w-3.5 h-3.5" /> Delete</button>
+                          </div>
+                        </div>
+                        <div className="flex-1 overflow-y-auto pr-1">
+                          {activeItems.length === 0 ? (
+                            <div className="flex flex-col items-center justify-center py-24 text-center opacity-60">
+                              <Database className="w-12 h-12 mb-4" />
+                              <h4 className="text-sm font-semibold mb-1">No items found</h4>
+                              <p className="text-xs max-w-xs">{selectedWebsiteFilter ? 'No items match the domain filter.' : 'Generate or run scraper scripts to fill this folder.'}</p>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-6">
+                              {activeItems.map(item => (
+                                <div key={item._id} className="bg-black/15 border border-black/10 rounded-xl p-5 flex flex-col justify-between hover:bg-black/25 transition-all duration-200">
+                                  <div className="flex justify-between items-start gap-4 mb-3">
+                                    <div>
+                                      <h4 className="font-semibold text-sm leading-snug line-clamp-2 text-inherit" title={item.title}>{item.title}</h4>
+                                      <span className="text-[10px] bg-black/10 border border-black/10 px-2 py-0.5 rounded-sm uppercase tracking-wider font-semibold font-mono inline-block mt-2">{getCleanDomainName(getDomain(item.source_url))}</span>
+                                    </div>
+                                    <span className="font-mono text-base font-bold text-inherit whitespace-nowrap">${item.price?.toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex items-center justify-between pt-3 border-t border-dashed border-black/15 text-xs">
+                                    <a href={item.source_url || '#'} target="_blank" rel="noopener noreferrer" className="font-semibold flex items-center gap-1 hover:underline text-inherit opacity-90 hover:opacity-100"><ExternalLink className="w-3.5 h-3.5" /> View Source</a>
+                                    <span className="text-[10px] opacity-75">{formatDate(item.updated_at || item.created_at)}</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
-                  </div>
-                )}
-              </div>
+                  </Folder>
+                );
+              })}
+            </div>
 
-              {/* Folder Footer info bar */}
-              <div className="mt-4 flex flex-wrap justify-between items-center px-4 text-xs font-mono text-zinc-800 z-10 font-bold uppercase tracking-wider gap-2">
-                <span>{totalFileCount} Files Generated</span>
-                <span>24 JAN — 30 DES 1971</span>
-                <span>OS SYSTEM v0.1.0</span>
-              </div>
+            <div className="w-full max-w-[1000px] mt-4 flex flex-wrap justify-between items-center px-4 text-xs font-mono text-zinc-800 z-10 font-bold uppercase tracking-wider gap-2 mx-auto">
+              <span>{totalFileCount} Files Generated</span>
+              <span>24 JAN — 30 DES 1971</span>
+              <span>OS SYSTEM v0.1.0</span>
             </div>
           </div>
 
-          {/* FLOATING ACTION OVERLAY CONTROLS (bottom right) */}
           <div className="action-controls-container">
-            {/* Scrape Add Floating Panel */}
             <div className={`expand-left-bar ${scrapeOpen ? 'expanded' : ''}`}>
               <form onSubmit={handleScrapeSubmit} className="flex items-center w-full">
                 <Database className="w-4 h-4 text-[#a39b90] mr-2 flex-shrink-0" />
@@ -1444,6 +1349,127 @@ function App() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Customize Folder Color Dialog */}
+      <Dialog open={colorPickerOpen} onOpenChange={setColorPickerOpen}>
+        <DialogContent className="max-w-[400px] bg-[#22201d] border-zinc-800 text-[#f5f2eb]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
+              <Palette className="w-5 h-5 text-[#96a68f]" /> Folder Style
+            </DialogTitle>
+            <DialogDescription className="text-[#a39b90] text-xs mt-1">
+              Customize style and color for folder "{targetCollectionForColor}"
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-6">
+            {/* Live Preview */}
+            <div className="flex flex-col items-center justify-center p-6 bg-[#181715] rounded-xl border border-white/5 relative overflow-hidden h-28">
+              <div className="absolute top-2 left-2 text-[10px] text-[#a39b90] uppercase tracking-wider font-semibold">Preview</div>
+              <div 
+                className="folder-tab-trapezoid font-semibold select-none scale-90"
+                style={{
+                  backgroundColor: selectedColor,
+                  color: isColorLight(selectedColor) ? '#181715' : '#eae6df',
+                  transform: 'translateY(8px)'
+                }}
+              >
+                <div 
+                  className="folder-index-badge"
+                  style={{
+                    backgroundColor: isColorLight(selectedColor) ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.12)'
+                  }}
+                >
+                  01
+                </div>
+                <span className="max-w-[120px] truncate">{targetCollectionForColor}</span>
+              </div>
+            </div>
+
+            {/* Preset Swatches */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#a39b90]">Preset Colors</label>
+              <div className="grid grid-cols-5 gap-2.5">
+                {[
+                  { hex: '#eae6df', name: 'Cream' },
+                  { hex: '#d6b885', name: 'Sand' },
+                  { hex: '#181715', name: 'Charcoal' },
+                  { hex: '#55614e', name: 'Sage' },
+                  { hex: '#ad765c', name: 'Clay' },
+                  { hex: '#466b73', name: 'Teal' },
+                  { hex: '#804a52', name: 'Berry' },
+                  { hex: '#69717d', name: 'Slate' },
+                  { hex: '#c0a468', name: 'Gold' },
+                  { hex: '#4e5561', name: 'Indigo' },
+                ].map(preset => (
+                  <button
+                    key={preset.hex}
+                    type="button"
+                    className="w-8 h-8 rounded-full border-2 transition-all relative group cursor-pointer p-0"
+                    style={{
+                      backgroundColor: preset.hex,
+                      borderColor: selectedColor.toLowerCase() === preset.hex.toLowerCase() ? '#96a68f' : 'transparent',
+                      boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.05)'
+                    }}
+                    onClick={() => setSelectedColor(preset.hex)}
+                    title={preset.name}
+                  >
+                    {selectedColor.toLowerCase() === preset.hex.toLowerCase() && (
+                      <span className={`absolute inset-0 flex items-center justify-center text-[10px] font-bold ${isColorLight(preset.hex) ? 'text-zinc-900' : 'text-zinc-100'}`}>✓</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Custom Color Input */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#a39b90]">Custom HEX Color</label>
+              <div className="flex gap-3 items-center">
+                <div className="w-10 h-10 rounded-lg overflow-hidden border border-white/10 relative flex-shrink-0 cursor-pointer">
+                  <input 
+                    type="color" 
+                    value={selectedColor} 
+                    onChange={(e) => setSelectedColor(e.target.value)} 
+                    className="absolute inset-0 w-full h-full p-0 border-none cursor-pointer scale-150"
+                  />
+                </div>
+                <Input 
+                  type="text" 
+                  value={selectedColor} 
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val.startsWith('#') && val.length <= 7) {
+                      setSelectedColor(val);
+                    } else if (!val.startsWith('#') && val.length <= 6) {
+                      setSelectedColor('#' + val);
+                    }
+                  }} 
+                  placeholder="#ffffff" 
+                  className="bg-[#12110f] border-white/5 focus:border-[#8c9c86] focus:ring-[#8c9c86]/20 font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex gap-2 pt-2 border-t border-white/5">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => setColorPickerOpen(false)} 
+              className="flex-1 border-white/10 text-[#f5f2eb] hover:bg-white/5"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSaveColor}
+              className="flex-1 bg-[#96a68f] text-[#181715] font-semibold hover:bg-[#a9b9a2]"
+            >
+              Save Color
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
