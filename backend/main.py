@@ -355,6 +355,7 @@ async def generate_parser(request: SnippetGenerationRequest, authorization: Opti
     
     # Execute code generation inside ADK self-improving LoopAgent
     try:
+        user_id = str(user["_id"]) if user else None
         session_id = str(uuid.uuid4())
         initial_state = {
             "html_snippet": request.html_snippet,
@@ -365,6 +366,8 @@ async def generate_parser(request: SnippetGenerationRequest, authorization: Opti
             "webpage_context": request.webpage_context or {},
             "generator_model": generator_model,
             "validator_model": validator_model,
+            "user_id": user_id,
+            "collection_name": request.collection_name,
         }
         session = await generator_runner.session_service.create_session(
             app_name=generator_runner.app_name,
@@ -633,7 +636,11 @@ async def query_catalog(request: QueryCatalogRequest):
         app_name=search_runner.app_name,
         user_id=request.user_id,
         session_id=request.conversation_id,
-        state={"gemini_model": search_model}
+        state={
+            "gemini_model": search_model,
+            "collection_name": request.collection_name,
+            "user_id": request.user_id
+        }
     )
 
     try:

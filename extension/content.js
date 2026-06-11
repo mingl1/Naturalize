@@ -865,11 +865,26 @@
           ?.getAttribute("content") || "",
     };
 
+    let collectionName = "visual_extract_items";
+    if (isContextValid() && chrome.storage && chrome.storage.local) {
+      try {
+        const result = await new Promise((resolve) => {
+          chrome.storage.local.get(["ag_selected_collection"], resolve);
+        });
+        if (result && result.ag_selected_collection) {
+          collectionName = result.ag_selected_collection;
+        }
+      } catch (e) {
+        console.error("Error reading collection name:", e);
+      }
+    }
+
     fetchFromBackend("http://127.0.0.1:8000/api/generate-parser", "POST", {
       html_snippet: htmlSnippet,
       context_url: window.location.href,
       user_context: userContext,
       webpage_context: webpageContext,
+      collection_name: collectionName,
     })
       .then((data) => {
         isGeneratingCode = false;

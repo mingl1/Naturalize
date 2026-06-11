@@ -234,6 +234,34 @@ def developer_prompt_injector(
     context_url = state.get("context_url", "")
     webpage_context = state.get("webpage_context") or {}
 
+    user_id = state.get("user_id")
+    collection_name = state.get("collection_name")
+    
+    existing_keys = []
+    has_valid_prices = False
+    has_valid_urls = False
+    checked_count = 0
+    
+    if user_id and collection_name:
+        try:
+            from bson import ObjectId
+            u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            
+            keys_set = set()
+            cursor = collection.find({"user_id": u_id, "collection_name": collection_name}).limit(10)
+            for doc in cursor:
+                checked_count += 1
+                meta = doc.get("metadata")
+                if isinstance(meta, dict):
+                    keys_set.update(meta.keys())
+                if doc.get("price") is not None and doc.get("price") != 0.0:
+                    has_valid_prices = True
+                if doc.get("source_url") is not None and doc.get("source_url") != "":
+                    has_valid_urls = True
+            existing_keys = sorted(list(keys_set))
+        except Exception as e:
+            print(f"[Warning] Failed to fetch existing schema in developer_prompt_injector: {e}")
+
     prompt_parts = [
         "=== CONTEXT STATE ===",
         "Target HTML Snippet:",
@@ -242,6 +270,17 @@ def developer_prompt_injector(
         "```",
         f"\nContext Source URL: {context_url or 'Unknown'}",
     ]
+
+    if collection_name:
+        prompt_parts.append(f"\nTarget Collection: {collection_name}")
+        if checked_count > 0:
+            if existing_keys:
+                prompt_parts.append(f"- Existing custom metadata fields in this collection: {existing_keys}")
+                prompt_parts.append("- IMPORTANT: You MUST write the BeautifulSoup script to extract these exact custom fields and store them in the `metadata` dictionary of the returned items, preserving their names and structures.")
+            if not has_valid_prices:
+                prompt_parts.append("- NOTE: Existing records in this collection do not have a price. You should set `price` to `None` in the extracted items.")
+            if not has_valid_urls:
+                prompt_parts.append("- NOTE: Existing records in this collection do not have source URLs. You should set `source_url` to `None` in the extracted items.")
 
     if webpage_context:
         prompt_parts.append("\nWebpage Metadata Context:")
@@ -259,8 +298,9 @@ def developer_prompt_injector(
         prompt_parts.append(user_context)
         prompt_parts.append(
             "\nIMPORTANT: Prioritize any fields specified in the User Guidelines. "
-            "The BeautifulSoup parser script MUST extract the standard ExtractedCatalogItem fields (title, price, source_url) "
-            "and any other requested custom fields. ALL custom fields MUST be populated inside the `metadata` dictionary "
+            "The BeautifulSoup parser script MUST extract the standard ExtractedCatalogItem fields: title is always required; "
+            "price and source_url are optional and should only be extracted if present/applicable on the page (otherwise set to None). "
+            "ALL custom fields MUST be populated inside the `metadata` dictionary "
             "of the ExtractedCatalogItem model so that the schema validation succeeds."
         )
 
@@ -291,11 +331,11 @@ developer_agent = Agent(
     1. The script must contain exactly this function signature:
        `def extract_items(html_content: str, base_url: str = "<default_url>") -> List[Dict[str, Any]]:`
        where you replace `<default_url>` with the actual Context Source URL (if provided in context state), otherwise `""`.
-    2. The function must parse `html_content` using BeautifulSoup, locate repeating containers, and return a list of dictionaries matching the ExtractedCatalogItem schema (title: str, price: float, source_url: str, metadata: dict).
+    2. The function must parse `html_content` using BeautifulSoup, locate repeating containers, and return a list of dictionaries matching the ExtractedCatalogItem schema (title: str, price: Optional[float], source_url: Optional[str], metadata: dict).
     3. Loop over repeating card/row containers and extract fields RELATIVE to each card (using container.find or container.select_one).
     4. Clean all strings and strip leading/trailing whitespaces.
-    5. Price must be normalized to a clean `float`. (e.g. "$1,249.99" -> 1249.99). Fallback to 0.0 if missing.
-    6. Resolve relative paths using `urllib.parse.urljoin(base_url, link)`.
+    5. Price is optional. If present, normalize it to a clean `float`. (e.g. "$1,249.99" -> 1249.99). If not present or not relevant, set it to `None`.
+    6. source_url is optional. If present, resolve relative paths using `urllib.parse.urljoin(base_url, link)`. If not present or not relevant, set it to `None`.
     7. All custom requested fields from the User Guidelines must be parsed and stored inside the `metadata` dictionary of the returned items.
     8. Import `ExtractedCatalogItem` and `AgenticCatalogSDK` from `sdk_blueprint` at the top of your script (e.g., `from sdk_blueprint import ExtractedCatalogItem, AgenticCatalogSDK`).
     9. Determine the most appropriate fields to uniquely identify each item for deduplication and output them in the `deduplication_keys` field. For example:
@@ -339,8 +379,17 @@ class PurePythonSchemaInspector(BaseAgent):
             return
 
         try:
+            user_id = context.session.state.get("user_id")
+            collection_name = context.session.state.get("collection_name")
+            query = {}
+            if user_id and user_id != "user_default":
+                from bson import ObjectId
+                query["user_id"] = ObjectId(user_id) if isinstance(user_id, str) else user_id
+            if collection_name:
+                query["collection_name"] = collection_name
+
             # Fetch a single document to infer active keys
-            sample_doc = collection.find_one()
+            sample_doc = collection.find_one(query)
             if sample_doc:
                 schema_keys = ["title", "price", "source_url"]
                 metadata_keys = list(sample_doc.get("metadata", {}).keys())

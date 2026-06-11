@@ -133,6 +133,9 @@ def save_items_to_db(user_id: str, collection_name: str, items: list, unique_key
     Supports single or compound unique_keys (e.g. ['title', 'metadata.duration']).
     """
     db = _get_db()
+    if not items or not isinstance(items, list):
+        return 0
+
     if not unique_keys:
         unique_keys = kwargs.get("unique_key")
 
@@ -140,6 +143,51 @@ def save_items_to_db(user_id: str, collection_name: str, items: list, unique_key
         unique_keys = ["title"]
     elif isinstance(unique_keys, str):
         unique_keys = [unique_keys]
+
+    u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+
+    # 1. Fetch unique keys in metadata of the incoming batch
+    new_metadata_keys = set()
+    for item in items:
+        meta = item.get("metadata")
+        if isinstance(meta, dict):
+            new_metadata_keys.update(meta.keys())
+
+    # 2. Fetch unique keys in metadata of the existing items in the database
+    existing_metadata_keys = set()
+    try:
+        for doc in db.items.find({"user_id": u_id, "collection_name": collection_name}).limit(10):
+            meta = doc.get("metadata")
+            if isinstance(meta, dict):
+                existing_metadata_keys.update(meta.keys())
+    except Exception as e:
+        print(f"[Warning] Failed to fetch existing metadata keys: {e}")
+
+    # 3. Combine to find all metadata keys that should exist in the collection
+    all_keys = existing_metadata_keys.union(new_metadata_keys)
+
+    # 4. Check for newly introduced keys
+    newly_added_keys = new_metadata_keys - existing_metadata_keys
+    if newly_added_keys:
+        try:
+            # Update all existing items in this collection in MongoDB to set the new keys to None
+            set_doc = {f"metadata.{k}": None for k in newly_added_keys}
+            db.items.update_many(
+                {"user_id": u_id, "collection_name": collection_name},
+                {"$set": set_doc}
+            )
+        except Exception as e:
+            print(f"[Warning] Failed to backfill new metadata keys {newly_added_keys}: {e}")
+
+    # 5. Ensure all items in the incoming batch have all keys in all_keys set to None if missing
+    for item in items:
+        meta = item.get("metadata")
+        if not isinstance(meta, dict):
+            meta = {}
+        for k in all_keys:
+            if k not in meta:
+                meta[k] = None
+        item["metadata"] = meta
 
     seen_keys = set()
     saved_count = 0
@@ -149,20 +197,28 @@ def save_items_to_db(user_id: str, collection_name: str, items: list, unique_key
         if not title:
             continue
             
-        price = 0.0
-        try:
-            price = float(item.get("price", 0.0))
-        except (ValueError, TypeError):
-            pass
+        price_val = item.get("price")
+        price = None
+        if price_val is not None and price_val != "":
+            try:
+                price = float(price_val)
+            except (ValueError, TypeError):
+                pass
             
-        source_url = item.get("source_url", "").strip()
+        source_url_val = item.get("source_url")
+        source_url = None
+        if isinstance(source_url_val, str):
+            source_url = source_url_val.strip()
+            if not source_url:
+                source_url = None
+
         metadata = item.get("metadata", {})
         if not isinstance(metadata, dict):
             metadata = {}
 
         # Set up unique filter for upsert
         filter_doc = {
-            "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
+            "user_id": u_id,
             "collection_name": collection_name
         }
         
@@ -196,19 +252,17 @@ def save_items_to_db(user_id: str, collection_name: str, items: list, unique_key
         if not has_unique_value:
             # Force insert by generating a unique _id since there's no valid unique value to upsert on
             filter_doc = {
-                "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
+                "user_id": u_id,
                 "collection_name": collection_name,
                 "_id": ObjectId()
             }
-
-
 
         try:
             db.items.update_one(
                 filter_doc,
                 {
                     "$set": {
-                        "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
+                        "user_id": u_id,
                         "collection_name": collection_name,
                         "title": title,
                         "price": price,
@@ -226,7 +280,6 @@ def save_items_to_db(user_id: str, collection_name: str, items: list, unique_key
         except Exception as e:
             print(f"[Warning] Failed to save item '{title}' to database: {e}")
 
-        
     return saved_count
 
 def get_collections_list(user_id: str) -> list:
