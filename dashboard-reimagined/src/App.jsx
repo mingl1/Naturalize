@@ -1099,34 +1099,18 @@ function App() {
                               )}
                             </div>
 
-                            <div className="flex flex-col gap-2 pt-3 border-t border-dashed border-black/15">
-                              <div className="flex items-center justify-between text-xs">
-                                <a 
-                                  href={item.source_url || '#'} 
-                                  target="_blank" 
+                            <div className="flex items-center justify-between pt-3 border-t border-dashed border-black/15 text-xs">
+                              <a 
+                                href={item.source_url || '#'} 
+                                target="_blank" 
                                   rel="noopener noreferrer" 
                                   className="font-semibold flex items-center gap-1 hover:underline text-inherit opacity-90 hover:opacity-100"
-                                >
-                                  <ExternalLink className="w-3.5 h-3.5" /> View Source
-                                </a>
-                                <span className="text-[10px] opacity-75">
-                                  {formatDate(item.updated_at || item.created_at)}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 mt-1">
-                                <span className="text-[9px] uppercase tracking-wider font-semibold opacity-60">Move to:</span>
-                                <select 
-                                  value={item.collection_name}
-                                  onChange={(e) => handleMoveItem(item._id, e.target.value)}
-                                  className="bg-black/20 hover:bg-black/40 border border-black/10 rounded px-1.5 py-0.5 text-[10px] text-inherit outline-none cursor-pointer flex-1"
-                                >
-                                  {collections.map(col => (
-                                    <option key={col} value={col} className="bg-[#181715] text-[#f5f2eb]">
-                                      {col}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" /> View Source
+                              </a>
+                              <span className="text-[10px] opacity-75">
+                                {formatDate(item.updated_at || item.created_at)}
+                              </span>
                             </div>
                           </div>
                         ))}
