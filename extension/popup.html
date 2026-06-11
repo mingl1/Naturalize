@@ -54,6 +54,20 @@
         </div>
       </div>
 
+      <!-- Scrape Collection Section -->
+      <div style="margin-bottom: 12px; display: flex; flex-direction: column; gap: 4px;">
+        <span class="section-title">Scrape Collection</span>
+        <div style="display: flex; gap: 8px; align-items: center; margin-top: 2px;">
+          <select id="select-collection" style="flex: 1; background: var(--terminal-bg); border: var(--terminal-border); border-radius: var(--border-radius-inner); padding: 5px 8px; font-size: 11px; color: var(--color-text-primary); font-weight: 600; outline: none; height: 28px; box-shadow: inset 1px 1px 3px rgba(0,0,0,0.05); cursor: pointer;">
+            <option value="visual_extract_items">visual_extract_items (Default)</option>
+            <option value="new_collection">+ Create New Collection...</option>
+          </select>
+        </div>
+        <div id="new-collection-container" style="display: none; margin-top: 4px;">
+          <input type="text" id="input-new-collection" placeholder="Collection name..." style="width: 100%; background: var(--terminal-bg); border: var(--terminal-border); border-radius: var(--border-radius-inner); padding: 5px 8px; font-size: 11px; color: var(--color-text-primary); outline: none; height: 28px; box-shadow: inset 1px 1px 3px rgba(0,0,0,0.05);">
+        </div>
+      </div>
+
       <!-- Extension status -->
       <div style="margin-bottom: 12px;">
         <span class="section-title">Workspace Engine</span>

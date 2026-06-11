@@ -33,7 +33,10 @@ import {
   ArrowLeft,
   X,
   Globe,
-  Database
+  Database,
+  FolderPlus,
+  Edit,
+  Trash2
 } from 'lucide-react';
 
 const API_BASE = "http://127.0.0.1:8000";
@@ -68,6 +71,17 @@ function App() {
   const [isLoadingItems, setIsLoadingItems] = useState(false);
   const [selectedWebsiteFilter, setSelectedWebsiteFilter] = useState('');
 
+  // Custom collections CRUD states
+  const [createCollectionOpen, setCreateCollectionOpen] = useState(false);
+  const [newCollectionName, setNewCollectionName] = useState('');
+  
+  const [renameCollectionOpen, setRenameCollectionOpen] = useState(false);
+  const [targetCollectionToRename, setTargetCollectionToRename] = useState('');
+  const [renamedCollectionName, setRenamedCollectionName] = useState('');
+
+  const [deleteCollectionOpen, setDeleteCollectionOpen] = useState(false);
+  const [targetCollectionToDelete, setTargetCollectionToDelete] = useState('');
+
   // Search state
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,6 +110,116 @@ function App() {
       title: title,
       description: msg,
     });
+  };
+
+  const handleCreateCollection = async (e) => {
+    e.preventDefault();
+    if (!newCollectionName.trim() || !user) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/collections`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({ name: newCollectionName.trim() })
+      });
+      if (res.ok) {
+        triggerToast(`Collection "${newCollectionName.trim()}" created successfully.`, "Folder Created");
+        setNewCollectionName('');
+        setCreateCollectionOpen(false);
+        fetchCollections();
+      } else {
+        const data = await res.json();
+        triggerToast(data.detail || 'Failed to create collection', "Error");
+      }
+    } catch (err) {
+      triggerToast('Could not connect to backend service.', "Error");
+    }
+  };
+
+  const handleRenameCollection = async (e) => {
+    e.preventDefault();
+    if (!renamedCollectionName.trim() || !targetCollectionToRename || !user) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/collections/${encodeURIComponent(targetCollectionToRename)}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({ new_name: renamedCollectionName.trim() })
+      });
+      if (res.ok) {
+        triggerToast(`Collection renamed to "${renamedCollectionName.trim()}".`, "Folder Renamed");
+        
+        if (activeCollection === targetCollectionToRename) {
+          setActiveCollection(renamedCollectionName.trim());
+        }
+        
+        setRenamedCollectionName('');
+        setTargetCollectionToRename('');
+        setRenameCollectionOpen(false);
+        fetchCollections();
+      } else {
+        const data = await res.json();
+        triggerToast(data.detail || 'Failed to rename collection', "Error");
+      }
+    } catch (err) {
+      triggerToast('Could not connect to backend service.', "Error");
+    }
+  };
+
+  const handleDeleteCollection = async () => {
+    if (!targetCollectionToDelete || !user) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/collections/${encodeURIComponent(targetCollectionToDelete)}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${user.token}`
+        }
+      });
+      if (res.ok) {
+        triggerToast(`Collection "${targetCollectionToDelete}" deleted successfully.`, "Folder Deleted");
+        
+        if (activeCollection === targetCollectionToDelete) {
+          setActiveCollection('');
+          setActiveTab('grid');
+        }
+        
+        setTargetCollectionToDelete('');
+        setDeleteCollectionOpen(false);
+        fetchCollections();
+      } else {
+        const data = await res.json();
+        triggerToast(data.detail || 'Failed to delete collection', "Error");
+      }
+    } catch (err) {
+      triggerToast('Could not connect to backend service.', "Error");
+    }
+  };
+
+  const handleMoveItem = async (itemId, targetCol) => {
+    if (!itemId || !targetCol || !user) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/items/${itemId}/collection`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({ collection_name: targetCol })
+      });
+      if (res.ok) {
+        triggerToast(`Item moved to folder "${targetCol}".`, "Item Reorganized");
+        fetchCollections();
+      } else {
+        const data = await res.json();
+        triggerToast(data.detail || 'Failed to move item', "Error");
+      }
+    } catch (err) {
+      triggerToast('Could not connect to backend service.', "Error");
+    }
   };
 
   // Extract clean domain from URL
@@ -694,14 +818,24 @@ function App() {
                         <h2 className="text-2xl font-bold font-title">Catalog Folders</h2>
                         <p className="text-xs text-[#a39b90]">Select a folder to browse captured listing data grids</p>
                       </div>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="border-white/10 bg-white/5 hover:bg-white/10 text-xs gap-2"
-                        onClick={() => fetchCollections()}
-                      >
-                        <RotateCw className="w-3.5 h-3.5" /> Refresh
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="border-white/10 bg-white/5 hover:bg-white/10 text-xs gap-2 text-[#96a68f]"
+                          onClick={() => setCreateCollectionOpen(true)}
+                        >
+                          <FolderPlus className="w-3.5 h-3.5" /> New Folder
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="border-white/10 bg-white/5 hover:bg-white/10 text-xs gap-2"
+                          onClick={() => fetchCollections()}
+                        >
+                          <RotateCw className="w-3.5 h-3.5" /> Refresh
+                        </Button>
+                      </div>
                     </div>
 
                     {isLoadingItems && collections.length === 0 ? (
@@ -732,13 +866,38 @@ function App() {
                             >
                               <div>
                                 <div className="flex items-center justify-between mb-4">
-                                  <div className="flex items-center gap-2">
-                                    <Folder className="w-5 h-5 text-[#96a68f]" />
-                                    <h3 className="font-bold text-lg text-[#f5f2eb] group-hover:text-[#96a68f] transition-colors">{col}</h3>
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <Folder className="w-5 h-5 text-[#96a68f] flex-shrink-0" />
+                                    <h3 className="font-bold text-lg text-[#f5f2eb] group-hover:text-[#96a68f] transition-colors truncate" title={col}>{col}</h3>
                                   </div>
-                                  <span className="text-xs bg-white/5 border border-white/10 px-2 py-0.5 rounded-full font-semibold text-[#a39b90]">
-                                    {itemsCount} items
-                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    <button 
+                                      className="text-zinc-500 hover:text-[#96a68f] transition-colors p-1"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setTargetCollectionToRename(col);
+                                        setRenamedCollectionName(col);
+                                        setRenameCollectionOpen(true);
+                                      }}
+                                      title="Rename Folder"
+                                    >
+                                      <Edit className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button 
+                                      className="text-zinc-500 hover:text-red-400 transition-colors p-1"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setTargetCollectionToDelete(col);
+                                        setDeleteCollectionOpen(true);
+                                      }}
+                                      title="Delete Folder"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                    <span className="text-xs bg-white/5 border border-white/10 px-2 py-0.5 rounded-full font-semibold text-[#a39b90] whitespace-nowrap">
+                                      {itemsCount} items
+                                    </span>
+                                  </div>
                                 </div>
 
                                 {/* Bento Box sources preview inside folder card */}
@@ -815,7 +974,28 @@ function App() {
                         <div>
                           <div className="flex items-center gap-2">
                             <Folder className="w-5 h-5 opacity-80" />
-                            <h2 className="text-xl font-bold font-title uppercase tracking-wide">{activeCollection}</h2>
+                            <h2 className="text-xl font-bold font-title uppercase tracking-wide max-w-[200px] truncate" title={activeCollection}>{activeCollection}</h2>
+                            <button 
+                              className="opacity-60 hover:opacity-100 transition-opacity p-1 text-inherit"
+                              onClick={() => {
+                                setTargetCollectionToRename(activeCollection);
+                                setRenamedCollectionName(activeCollection);
+                                setRenameCollectionOpen(true);
+                              }}
+                              title="Rename Folder"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button 
+                              className="opacity-60 hover:opacity-100 hover:text-red-600 transition-all p-1 text-inherit"
+                              onClick={() => {
+                                setTargetCollectionToDelete(activeCollection);
+                                setDeleteCollectionOpen(true);
+                              }}
+                              title="Delete Folder"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                           <p className="text-xs opacity-75">
                             Showing {activeItems.length} of {(collectionsItems[activeCollection]?.items || []).length} catalog records
@@ -919,18 +1099,34 @@ function App() {
                               )}
                             </div>
 
-                            <div className="flex items-center justify-between pt-3 border-t border-dashed border-black/15 text-xs">
-                              <a 
-                                href={item.source_url || '#'} 
-                                target="_blank" 
-                                rel="noopener noreferrer" 
-                                className="font-semibold flex items-center gap-1 hover:underline text-inherit opacity-90 hover:opacity-100"
-                              >
-                                <ExternalLink className="w-3.5 h-3.5" /> View Source
-                              </a>
-                              <span className="text-[10px] opacity-75">
-                                {formatDate(item.updated_at || item.created_at)}
-                              </span>
+                            <div className="flex flex-col gap-2 pt-3 border-t border-dashed border-black/15">
+                              <div className="flex items-center justify-between text-xs">
+                                <a 
+                                  href={item.source_url || '#'} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className="font-semibold flex items-center gap-1 hover:underline text-inherit opacity-90 hover:opacity-100"
+                                >
+                                  <ExternalLink className="w-3.5 h-3.5" /> View Source
+                                </a>
+                                <span className="text-[10px] opacity-75">
+                                  {formatDate(item.updated_at || item.created_at)}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-1">
+                                <span className="text-[9px] uppercase tracking-wider font-semibold opacity-60">Move to:</span>
+                                <select 
+                                  value={item.collection_name}
+                                  onChange={(e) => handleMoveItem(item._id, e.target.value)}
+                                  className="bg-black/20 hover:bg-black/40 border border-black/10 rounded px-1.5 py-0.5 text-[10px] text-inherit outline-none cursor-pointer flex-1"
+                                >
+                                  {collections.map(col => (
+                                    <option key={col} value={col} className="bg-[#181715] text-[#f5f2eb]">
+                                      {col}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -1167,6 +1363,140 @@ function App() {
               onClick={handleSaveSettings}
             >
               Save Settings
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create Collection Dialog */}
+      <Dialog open={createCollectionOpen} onOpenChange={setCreateCollectionOpen}>
+        <DialogContent className="max-w-[400px] bg-[#22201d] border-zinc-800 text-[#f5f2eb]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
+              <FolderPlus className="w-5 h-5 text-[#96a68f]" /> Create New Folder
+            </DialogTitle>
+            <DialogDescription className="text-[#a39b90] text-xs mt-1">
+              Create a new empty catalog folder to store your scraped items.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleCreateCollection} className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#a39b90]">Folder Name</label>
+              <Input
+                type="text"
+                placeholder="e.g. Mechanical Keyboards"
+                value={newCollectionName}
+                onChange={(e) => setNewCollectionName(e.target.value)}
+                className="bg-[#12110f] border-white/5 focus:border-[#8c9c86] focus:ring-[#8c9c86]/20"
+                required
+              />
+            </div>
+            <DialogFooter className="flex gap-2 pt-2 border-t border-white/5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setCreateCollectionOpen(false);
+                  setNewCollectionName('');
+                }}
+                className="flex-1 border-white/10 text-[#f5f2eb] hover:bg-white/5"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1 bg-[#96a68f] text-[#181715] font-semibold hover:bg-[#a9b9a2]"
+              >
+                Create Folder
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename Collection Dialog */}
+      <Dialog open={renameCollectionOpen} onOpenChange={setRenameCollectionOpen}>
+        <DialogContent className="max-w-[400px] bg-[#22201d] border-zinc-800 text-[#f5f2eb]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl font-semibold">
+              <Edit className="w-5 h-5 text-[#96a68f]" /> Rename Folder
+            </DialogTitle>
+            <DialogDescription className="text-[#a39b90] text-xs mt-1">
+              Rename folder "{targetCollectionToRename}" to a new name.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form onSubmit={handleRenameCollection} className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-[#a39b90]">New Name</label>
+              <Input
+                type="text"
+                placeholder="e.g. Vintage Keyboards"
+                value={renamedCollectionName}
+                onChange={(e) => setRenamedCollectionName(e.target.value)}
+                className="bg-[#12110f] border-white/5 focus:border-[#8c9c86] focus:ring-[#8c9c86]/20"
+                required
+              />
+            </div>
+            <DialogFooter className="flex gap-2 pt-2 border-t border-white/5">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setRenameCollectionOpen(false);
+                  setRenamedCollectionName('');
+                  setTargetCollectionToRename('');
+                }}
+                className="flex-1 border-white/10 text-[#f5f2eb] hover:bg-white/5"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1 bg-[#96a68f] text-[#181715] font-semibold hover:bg-[#a9b9a2]"
+              >
+                Rename
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Collection Confirmation Dialog */}
+      <Dialog open={deleteCollectionOpen} onOpenChange={setDeleteCollectionOpen}>
+        <DialogContent className="max-w-[400px] bg-[#22201d] border-zinc-800 text-[#f5f2eb]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-xl font-semibold text-red-400">
+              <Trash2 className="w-5 h-5" /> Delete Folder
+            </DialogTitle>
+            <DialogDescription className="text-[#a39b90] text-xs mt-1">
+              Are you sure you want to delete folder "{targetCollectionToDelete}"?
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 text-sm text-[#f5f2eb]">
+            This action <strong className="text-red-400">cannot be undone</strong>. All scraped catalog items inside this folder will be permanently deleted.
+          </div>
+
+          <DialogFooter className="flex gap-2 pt-2 border-t border-white/5">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setDeleteCollectionOpen(false);
+                setTargetCollectionToDelete('');
+              }}
+              className="flex-1 border-white/10 text-[#f5f2eb] hover:bg-white/5"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleDeleteCollection}
+              className="flex-1 bg-red-500 text-white font-semibold hover:bg-red-600 border border-red-600"
+            >
+              Delete Folder
             </Button>
           </DialogFooter>
         </DialogContent>

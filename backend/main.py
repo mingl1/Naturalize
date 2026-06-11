@@ -69,6 +69,16 @@ class SearchRequest(BaseModel):
     q: str = Field(...)
     collection_name: Optional[str] = Field(default=None)
 
+class CreateCollectionRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+
+class RenameCollectionRequest(BaseModel):
+    new_name: str = Field(..., min_length=1)
+
+class MoveItemRequest(BaseModel):
+    collection_name: str = Field(..., min_length=1)
+
+
 @app.get("/")
 def read_root():
     return {
@@ -252,6 +262,39 @@ def search_items(payload: SearchRequest, current_user: dict = Depends(get_curren
             col_items = database.search_collection_items_list(user_id, col, payload.q, gemini_key, search_model)
             items.extend(col_items)
     return {"items": items}
+
+@app.post("/api/collections")
+def create_collection(payload: CreateCollectionRequest, current_user: dict = Depends(get_current_user)):
+    user_id = str(current_user["_id"])
+    success = database.create_collection(user_id, payload.name)
+    if not success:
+        raise HTTPException(status_code=400, detail="Collection already exists.")
+    return {"success": True, "name": payload.name}
+
+@app.put("/api/collections/{collection_name}")
+def rename_collection(collection_name: str, payload: RenameCollectionRequest, current_user: dict = Depends(get_current_user)):
+    user_id = str(current_user["_id"])
+    success = database.rename_collection(user_id, collection_name, payload.new_name)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to rename collection.")
+    return {"success": True, "old_name": collection_name, "new_name": payload.new_name}
+
+@app.delete("/api/collections/{collection_name}")
+def delete_collection(collection_name: str, current_user: dict = Depends(get_current_user)):
+    user_id = str(current_user["_id"])
+    success = database.delete_collection(user_id, collection_name)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to delete collection.")
+    return {"success": True}
+
+@app.put("/api/items/{item_id}/collection")
+def move_item_collection(item_id: str, payload: MoveItemRequest, current_user: dict = Depends(get_current_user)):
+    user_id = str(current_user["_id"])
+    success = database.move_item_to_collection(user_id, item_id, payload.collection_name)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to move item to collection.")
+    return {"success": True}
+
 
 # --- Generator & Execution Endpoints (Updated) ---
 @app.post("/api/generate-parser", response_model=SnippetGenerationResponse)

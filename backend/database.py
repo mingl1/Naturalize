@@ -231,12 +231,113 @@ def save_items_to_db(user_id: str, collection_name: str, items: list, unique_key
 
 def get_collections_list(user_id: str) -> list:
     """
-    Returns distinct collection names for the user.
+    Returns distinct collection names for the user, merging custom collections
+    and distinct collection names from existing items.
     """
     db = _get_db()
     u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
-    collections = db.items.distinct("collection_name", {"user_id": u_id})
+    
+    # 1. Fetch user custom defined collections
+    custom_cols = [col["name"] for col in db.collections.find({"user_id": u_id})]
+    
+    # 2. Fetch distinct item collections
+    item_cols = db.items.distinct("collection_name", {"user_id": u_id})
+    
+    # Merge and sort
+    collections = list(set(custom_cols + item_cols))
     return sorted(collections)
+
+def create_collection(user_id: str, name: str) -> bool:
+    """
+    Creates an empty collection/folder for the user if it doesn't already exist.
+    """
+    db = _get_db()
+    u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+    
+    # Check if a custom collection with this name already exists
+    existing = db.collections.find_one({"user_id": u_id, "name": name})
+    if existing:
+        return False
+        
+    db.collections.insert_one({
+        "user_id": u_id,
+        "name": name,
+        "created_at": datetime.datetime.utcnow()
+    })
+    return True
+
+def rename_collection(user_id: str, old_name: str, new_name: str) -> bool:
+    """
+    Renames a collection for the user. Renames the custom collection document
+    and updates the collection_name for all items in that collection.
+    """
+    db = _get_db()
+    u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+    
+    # 1. Rename custom collection document (upsert in case it was created implicitly by old items)
+    db.collections.update_one(
+        {"user_id": u_id, "name": old_name},
+        {
+            "$set": {
+                "name": new_name,
+                "updated_at": datetime.datetime.utcnow()
+            },
+            "$setOnInsert": {
+                "created_at": datetime.datetime.utcnow()
+            }
+        },
+        upsert=True
+    )
+    
+    # 2. Rename items matching old_name
+    db.items.update_many(
+        {"user_id": u_id, "collection_name": old_name},
+        {"$set": {"collection_name": new_name}}
+    )
+    
+    return True
+
+def delete_collection(user_id: str, name: str) -> bool:
+    """
+    Deletes a collection and all items contained in it.
+    """
+    db = _get_db()
+    u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+    
+    # 1. Delete custom collection document
+    db.collections.delete_one({"user_id": u_id, "name": name})
+    
+    # 2. Delete items in this collection
+    db.items.delete_many({"user_id": u_id, "collection_name": name})
+    
+    return True
+
+def move_item_to_collection(user_id: str, item_id: str, collection_name: str) -> bool:
+    """
+    Moves a single item from one collection to another.
+    Ensures the target collection name is registered in custom collections.
+    """
+    db = _get_db()
+    u_id = ObjectId(user_id) if isinstance(user_id, str) else user_id
+    
+    # 1. Update the item collection
+    res = db.items.update_one(
+        {"user_id": u_id, "_id": ObjectId(item_id)},
+        {"$set": {"collection_name": collection_name}}
+    )
+    
+    # 2. Register/ensure target collection exists
+    db.collections.update_one(
+        {"user_id": u_id, "name": collection_name},
+        {
+            "$set": {"name": collection_name},
+            "$setOnInsert": {"created_at": datetime.datetime.utcnow()}
+        },
+        upsert=True
+    )
+    
+    return res.modified_count > 0
+
 
 def get_collection_items_list(user_id: str, collection_name: str) -> list:
     """

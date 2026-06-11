@@ -242,6 +242,7 @@ document.addEventListener("DOMContentLoaded", () => {
     locatorContent.style.display = "block";
     historyContent.style.display = "none";
     settingsContent.style.display = "none";
+    fetchCollectionsAndPopulate();
   });
 
   tabHistory.addEventListener("click", () => {
@@ -284,6 +285,7 @@ document.addEventListener("DOMContentLoaded", () => {
     chrome.storage.local.set({ ag_extension_token: token }, () => {
       addConsoleLog("Extension Access Token saved!", "success");
       btnSaveToken.textContent = "Saved!";
+      fetchCollectionsAndPopulate();
       setTimeout(() => {
         btnSaveToken.textContent = "Save Token";
       }, 1500);
@@ -428,4 +430,86 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+
+  const selectCollection = document.getElementById("select-collection");
+  const newCollectionContainer = document.getElementById("new-collection-container");
+  const inputNewCollection = document.getElementById("input-new-collection");
+
+  async function fetchCollectionsAndPopulate() {
+    chrome.storage.local.get(["ag_extension_token", "ag_selected_collection"], async (result) => {
+      const token = result.ag_extension_token;
+      const selected = result.ag_selected_collection || "visual_extract_items";
+
+      // Reset options
+      selectCollection.innerHTML = `
+        <option value="visual_extract_items">visual_extract_items (Default)</option>
+        <option value="new_collection">+ Create New Collection...</option>
+      `;
+
+      if (!token) {
+        selectCollection.value = "visual_extract_items";
+        newCollectionContainer.style.display = "none";
+        chrome.storage.local.set({ ag_selected_collection: "visual_extract_items" });
+        return;
+      }
+
+      try {
+        const response = await fetch("http://127.0.0.1:8000/api/collections", {
+          headers: {
+            "Authorization": `Bearer ${token}`
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const collections = data.collections || [];
+
+          // Add fetched collections to dropdown
+          collections.forEach(col => {
+            if (col !== "visual_extract_items") {
+              const option = document.createElement("option");
+              option.value = col;
+              option.textContent = col;
+              selectCollection.appendChild(option);
+            }
+          });
+
+          // Check if selected collection is in the list
+          const hasSelected = collections.includes(selected) || selected === "visual_extract_items";
+          if (hasSelected) {
+            selectCollection.value = selected;
+            newCollectionContainer.style.display = "none";
+          } else {
+            selectCollection.value = "new_collection";
+            newCollectionContainer.style.display = "block";
+            inputNewCollection.value = selected;
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching collections:", err);
+      }
+    });
+  }
+
+  // Initial fetch on DOM load
+  fetchCollectionsAndPopulate();
+
+  // Listen to select change
+  selectCollection.addEventListener("change", (e) => {
+    const val = e.target.value;
+    if (val === "new_collection") {
+      newCollectionContainer.style.display = "block";
+      const newName = inputNewCollection.value.trim() || "new_collection";
+      chrome.storage.local.set({ ag_selected_collection: newName });
+    } else {
+      newCollectionContainer.style.display = "none";
+      chrome.storage.local.set({ ag_selected_collection: val });
+      addConsoleLog(`Active collection set to: ${val}`, "success");
+    }
+  });
+
+  // Listen to input text change
+  inputNewCollection.addEventListener("input", (e) => {
+    const newName = e.target.value.trim() || "new_collection";
+    chrome.storage.local.set({ ag_selected_collection: newName });
+  });
 });

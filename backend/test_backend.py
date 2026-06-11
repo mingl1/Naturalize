@@ -212,6 +212,47 @@ def extract_items(html_content: str, base_url: str = "https://example.com/store"
             == "https://example.com/products/kbd-001"
         )
 
+        # 4. Test Collections APIs
+        print("\nTesting Collections API routes...")
+        with patch("database.create_collection") as mock_create_col, \
+             patch("database.rename_collection") as mock_rename_col, \
+             patch("database.delete_collection") as mock_delete_col, \
+             patch("database.move_item_to_collection") as mock_move_item:
+            
+            # Test POST /api/collections
+            mock_create_col.return_value = True
+            r_col_create = client.post("/api/collections", json={"name": "New Cool Collection"}, headers=headers)
+            assert r_col_create.status_code == 200
+            assert r_col_create.json()["success"] is True
+            assert r_col_create.json()["name"] == "New Cool Collection"
+            mock_create_col.assert_called_once_with(str(mock_get_user.return_value["_id"]), "New Cool Collection")
+
+            # Test PUT /api/collections/{collection_name}
+            mock_rename_col.return_value = True
+            r_col_rename = client.put("/api/collections/Old%20Col", json={"new_name": "New Col"}, headers=headers)
+            assert r_col_rename.status_code == 200
+            assert r_col_rename.json()["success"] is True
+            assert r_col_rename.json()["old_name"] == "Old Col"
+            assert r_col_rename.json()["new_name"] == "New Col"
+            mock_rename_col.assert_called_once_with(str(mock_get_user.return_value["_id"]), "Old Col", "New Col")
+
+            # Test DELETE /api/collections/{collection_name}
+            mock_delete_col.return_value = True
+            r_col_delete = client.delete("/api/collections/Delete%20Me", headers=headers)
+            assert r_col_delete.status_code == 200
+            assert r_col_delete.json()["success"] is True
+            mock_delete_col.assert_called_once_with(str(mock_get_user.return_value["_id"]), "Delete Me")
+
+            # Test PUT /api/items/{item_id}/collection
+            mock_move_item.return_value = True
+            item_id = "60d5ec49f87c5131f47b2c5e"
+            r_item_move = client.put(f"/api/items/{item_id}/collection", json={"collection_name": "Target Col"}, headers=headers)
+            assert r_item_move.status_code == 200
+            assert r_item_move.json()["success"] is True
+            mock_move_item.assert_called_once_with(str(mock_get_user.return_value["_id"]), item_id, "Target Col")
+            
+        print("Collections API routes test passed!")
+
         print("\n[SUCCESS] Backend verification passed successfully!")
 
 

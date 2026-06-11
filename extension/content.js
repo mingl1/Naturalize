@@ -1001,6 +1001,20 @@
   async function runParserExecution() {
     if (!generatedCode) return;
 
+    let collectionName = "visual_extract_items";
+    if (isContextValid() && chrome.storage && chrome.storage.local) {
+      try {
+        const result = await new Promise((resolve) => {
+          chrome.storage.local.get(["ag_selected_collection"], resolve);
+        });
+        if (result && result.ag_selected_collection) {
+          collectionName = result.ag_selected_collection;
+        }
+      } catch (e) {
+        console.error("Error reading collection name:", e);
+      }
+    }
+
     // Check if auto-pagination is toggled
     const isPaginateEnabled =
       document.getElementById("ag-paginate-toggle")?.checked;
@@ -1032,7 +1046,7 @@
         current_page: 1,
         collected_html: [firstPageHtml],
         generated_code: generatedCode,
-        collection_name: "visual_extract_items",
+        collection_name: collectionName,
         unique_key: deduplicationKeys[0] || "title",
         unique_keys: deduplicationKeys,
         delay: delay,
@@ -1067,12 +1081,12 @@
     const fullHtml = await getExpandedPageHtml();
 
     document.getElementById("ag-execute-btn").disabled = true;
-    addPanelLog("Executing parser against page DOM inside backend sandbox...");
+    addPanelLog(`Executing parser against page DOM inside backend sandbox (Collection: ${collectionName})...`);
 
     fetchFromBackend("http://127.0.0.1:8000/api/execute-parser", "POST", {
       generated_code: generatedCode,
       full_html: fullHtml,
-      collection_name: "visual_extract_items",
+      collection_name: collectionName,
       unique_key: deduplicationKeys[0] || "title",
       unique_keys: deduplicationKeys,
     })
