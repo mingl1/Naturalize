@@ -6,10 +6,10 @@ A lightweight visual asset collection tool and scraping generator. The engine by
 
 ## 🏗️ Architecture Overview
 
-The system consists of three primary components:
-1. **Front-End UX ([extension](file:///C:/Users/gameg/Documents/antigravity/peaceful-volta/extension))**: A Manifest V3 Chrome and Firefox Extension that monitors DOM hovers, lets you visually identify item listings, and supports click action recording.
-2. **React Dashboard ([dashboard](file:///C:/Users/gameg/Documents/antigravity/peaceful-volta/dashboard))**: A Vite-based UI interface for managing collections, browsing scraped items, configuring credentials, and executing semantic searches.
-3. **Control Plane ([backend](file:///C:/Users/gameg/Documents/antigravity/peaceful-volta/backend))**: A FastAPI service that uses a self-improving LoopAgent generator to compile robust, sandboxed BeautifulSoup scraping scripts and supports conversational Q&A search workflows.
+The system consists of two primary components:
+
+1. **Front-End UX (`/extension`)**: A Manifest V3 Chrome Extension that monitors DOM hovers and lets you visual identify item listings.
+2. **Control Plane (`/backend`)**: A FastAPI service that takes stripped HTML snippets, infers structural CSS selectors, and outputs runnable Python scripts conforming to our Core SDK specification.
 
 ---
 
@@ -109,19 +109,30 @@ The dashboard will be available at `http://localhost:5173`.
 
 ## ⚙️ Configuration (.env)
 
-Configure your API keys and MongoDB settings in `/backend/.env` (refer to [.env.example](file:///C:/Users/gameg/Documents/antigravity/peaceful-volta/.env.example)):
+The generator can leverage LLMs for high-fidelity selector generation. Set at least one API key in `/backend/.env` (based on the template in [.env.example](file:///C:/Users/gameg/Documents/antigravity/peaceful-volta/.env.example)):
+
 - `GEMINI_API_KEY`: API Key for Google Gemini.
-- `OPENAI_API_KEY`: API Key for OpenAI.
-- `MONGODB_URI`: Connection string for MongoDB (defaults to `mongodb://localhost:27017`).
+
+_If no keys are configured, the backend automatically falls back to local HTML parsing heuristics._
 
 ---
 
 ## 🧹 Linting and Formatting
 
 This project enforces strict style conventions using `ruff`:
-- **Run linter checks**: `ruff check .`
-- **Auto-fix style violations**: `ruff check --fix .`
-- **Reformat codebase**: `ruff format .`
+
+- **Run linter checks**:
+  ```bash
+  ruff check .
+  ```
+- **Auto-fix style violations**:
+  ```bash
+  ruff check --fix .
+  ```
+- **Reformat codebase**:
+  ```bash
+  ruff format .
+  ```
 
 ---
 

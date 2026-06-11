@@ -78,28 +78,34 @@ def generate_parser_code(
 ) -> Tuple[bool, str, Dict[str, str], str]:
     """
     Tries to generate the parsing code using LLM (Gemini or OpenAI).
-    Falls back to a smart heuristic engine if no API keys are present.
+    Falls back to a smart heuristic engine if LLM fails or no API keys are present.
     """
     gemini_key = os.environ.get("GEMINI_API_KEY")
-    openai_key = os.environ.get("OPENAI_API_KEY")
 
+    success = False
+    code = ""
+    selectors = {}
+    message = ""
+
+    # Try Gemini first if key is present
     if gemini_key:
         success, code, selectors, message = _generate_with_gemini(
             gemini_key, html_snippet, context_url, user_context, webpage_context, gemini_model
         )
-    elif openai_key:
-        success, code, selectors, message = _generate_with_openai(
-            openai_key, html_snippet, context_url, user_context, webpage_context
-        )
-    else:
-        success, code, selectors, message = _generate_with_heuristics(
-            html_snippet, context_url, user_context, webpage_context
-        )
+        if success:
+            code = _clean_python_code(code)
+            return success, code, selectors, message
 
+
+    # Fall back to structural heuristics if all LLM options fail/missing
+    fallback_msg = f"LLM generation failed ({message or 'no keys configured'}). Falling back to heuristics."
+    print(f"⚠️ [Generator] {fallback_msg}")
+    success, code, selectors, heuristics_msg = _generate_with_heuristics(
+        html_snippet, context_url, user_context, webpage_context
+    )
     if success and code:
         code = _clean_python_code(code)
-
-    return success, code, selectors, message
+    return success, code, selectors, f"{heuristics_msg} ({fallback_msg})"
 
 
 def _generate_with_gemini(
@@ -254,14 +260,16 @@ def _generate_with_heuristics(
     # Common element layouts: .item, .card, .product, tr, li, article
     item_selector = ""
     candidates = [
+        "[class*='card']",
+        "[class*='Card']",
+        "[class*='item']",
+        "[class*='Item']",
+        "[class*='listing']",
+        "[class*='product']",
+        "[class*='post']",
         "article",
         "li",
         "tr",
-        "[class*='item']",
-        "[class*='card']",
-        "[class*='product']",
-        "[class*='post']",
-        "[class*='listing']",
         "div > div",
     ]
 

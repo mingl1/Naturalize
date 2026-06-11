@@ -24,7 +24,8 @@
   let isSelectingNextButton = false;
   let isGeneratingCode = false;
   let isPaginationActive = false;
-  let deduplicationKeys = ["title"];
+  let paginationTimeoutId = null;
+  let isUnloading = false;
 
   // Detail steps and recording variables
   let extractionMode = "simple"; // 'simple' | 'advanced'
@@ -36,13 +37,15 @@
 
   let detailStepsEnabled = false;
   let expandSteps = []; // array of { type, target }
-  let closeSteps = [];  // array of { type, target }
+  let closeSteps = []; // array of { type, target }
   let modalSelector = "";
   let pickingStepIndex = null; // null | number | 'modal' | 'expand_<idx>' | 'close_<idx>'
 
   // Check if extension context is valid
   function isContextValid() {
-    return typeof chrome !== "undefined" && chrome.runtime && !!chrome.runtime.id;
+    return (
+      typeof chrome !== "undefined" && chrome.runtime && !!chrome.runtime.id
+    );
   }
 
   // Helper to proxy fetch requests through background service worker to bypass CSP/mixed-content blocks
@@ -66,7 +69,7 @@
           method,
           headers: {
             "Content-Type": "application/json",
-            "Authorization": token ? `Bearer ${token}` : "",
+            Authorization: token ? `Bearer ${token}` : "",
           },
           body,
         },
@@ -80,7 +83,7 @@
           } else {
             resolve(response.data);
           }
-        }
+        },
       );
     });
   }
@@ -95,10 +98,12 @@
       return;
     }
 
-    const isPaginateEnabled = document.getElementById("ag-paginate-toggle")?.checked;
+    const isPaginateEnabled =
+      document.getElementById("ag-paginate-toggle")?.checked;
     if (isPaginateEnabled && !nextButtonSelector) {
       codegenBtn.disabled = true;
-      codegenBtn.title = "Please select a Next Page Button before generating parser.";
+      codegenBtn.title =
+        "Please select a Next Page Button before generating parser.";
     } else {
       codegenBtn.disabled = false;
       codegenBtn.removeAttribute("title");
@@ -239,6 +244,13 @@
     if (selectedParent) updateParentOverlay(selectedParent);
   });
 
+  window.addEventListener("beforeunload", () => {
+    isUnloading = true;
+    if (paginationTimeoutId) {
+      clearTimeout(paginationTimeoutId);
+    }
+  });
+
   /**
    * Updates hover overlay position and badge details based on target element
    */
@@ -366,9 +378,13 @@
       if (isRecording) {
         // Exclude recorder bar and depth panel clicks
         if (
-          document.getElementById("antigravity-recorder-bar")?.contains(e.target) ||
+          document
+            .getElementById("antigravity-recorder-bar")
+            ?.contains(e.target) ||
           e.target.id === "antigravity-recorder-bar" ||
-          document.getElementById("antigravity-depth-panel")?.contains(e.target) ||
+          document
+            .getElementById("antigravity-depth-panel")
+            ?.contains(e.target) ||
           e.target.id === "antigravity-depth-panel"
         ) {
           return;
@@ -380,21 +396,24 @@
 
         const selector = generateCssSelector(e.target);
         const fullSelector = generateFullUniqueCssSelector(e.target);
-        const actions = recordingPhase === "expand" ? recordedExpandActions : recordedCloseActions;
-        
+        const actions =
+          recordingPhase === "expand"
+            ? recordedExpandActions
+            : recordedCloseActions;
+
         if (elapsed > 100) {
           actions.push({ type: "wait", target: String(elapsed) });
         }
-        actions.push({ 
-          type: "click", 
-          element: e.target, 
+        actions.push({
+          type: "click",
+          element: e.target,
           selector: selector,
-          fullSelector: fullSelector
+          fullSelector: fullSelector,
         });
-        
+
         saveRecordingState();
         addPanelLog(`[Recorded] Click on: <${e.target.tagName.toLowerCase()}>`);
-        
+
         // Notify popup
         if (isContextValid()) {
           try {
@@ -402,7 +421,7 @@
               action: "actionRecorded",
               phase: recordingPhase,
               count: getRecordingClickCount(),
-              elementTag: e.target.tagName.toLowerCase()
+              elementTag: e.target.tagName.toLowerCase(),
             });
           } catch (err) {
             // ignore if popup closed
@@ -415,7 +434,10 @@
 
       // 2. If picking element for a step or modal selector, capture and block click
       if (pickingStepIndex !== null) {
-        if (document.getElementById("antigravity-depth-panel")?.contains(e.target)) return;
+        if (
+          document.getElementById("antigravity-depth-panel")?.contains(e.target)
+        )
+          return;
 
         e.preventDefault();
         e.stopPropagation();
@@ -433,22 +455,34 @@
           const phase = parts[0];
           const idx = parseInt(parts[1], 10);
           const step = phase === "expand" ? expandSteps[idx] : closeSteps[idx];
-          
+
           if (step) {
             if (step.type === "click_relative") {
               const itemSel = inferredSelectors?.item_selector;
               const itemContainer = itemSel ? target.closest(itemSel) : null;
-              
+
               if (itemContainer) {
-                step.target = generateRelativeCssSelector(target, itemContainer);
-                addPanelLog(`Selected relative selector: ${step.target}`, "success");
+                step.target = generateRelativeCssSelector(
+                  target,
+                  itemContainer,
+                );
+                addPanelLog(
+                  `Selected relative selector: ${step.target}`,
+                  "success",
+                );
               } else {
                 step.target = selector;
-                addPanelLog(`Selected selector (absolute fallback, no item container found): ${step.target}`, "warning");
+                addPanelLog(
+                  `Selected selector (absolute fallback, no item container found): ${step.target}`,
+                  "warning",
+                );
               }
             } else {
               step.target = selector;
-              addPanelLog(`Selected absolute selector: ${step.target}`, "success");
+              addPanelLog(
+                `Selected absolute selector: ${step.target}`,
+                "success",
+              );
             }
           }
         }
@@ -755,9 +789,13 @@
   async function runCodeGen() {
     if (!selectedParent) return;
 
-    const isPaginateEnabled = document.getElementById("ag-paginate-toggle")?.checked;
+    const isPaginateEnabled =
+      document.getElementById("ag-paginate-toggle")?.checked;
     if (isPaginateEnabled && !nextButtonSelector) {
-      addPanelLog("Please select a Next Page Button before generating parser.", "error");
+      addPanelLog(
+        "Please select a Next Page Button before generating parser.",
+        "error",
+      );
       return;
     }
 
@@ -767,10 +805,19 @@
     );
 
     let finalSelectedParent = selectedParent;
-    if (detailStepsEnabled && (expandSteps.length > 0 || closeSteps.length > 0)) {
-      const firstItem = getItemContainerOfClicked(clickedElement, selectedParent);
+    if (
+      detailStepsEnabled &&
+      (expandSteps.length > 0 || closeSteps.length > 0)
+    ) {
+      const firstItem = getItemContainerOfClicked(
+        clickedElement,
+        selectedParent,
+      );
       if (firstItem) {
-        addPanelLog("Expanding first item to capture detailed code generation snippet...", "info");
+        addPanelLog(
+          "Expanding first item to capture detailed code generation snippet...",
+          "info",
+        );
         await executeStepsForElement(firstItem, expandSteps);
 
         finalSelectedParent = selectedParent.cloneNode(true);
@@ -780,7 +827,9 @@
             const children = Array.from(selectedParent.children);
             const idx = children.indexOf(firstItem);
             if (idx !== -1 && finalSelectedParent.children[idx]) {
-              finalSelectedParent.children[idx].appendChild(modalEl.cloneNode(true));
+              finalSelectedParent.children[idx].appendChild(
+                modalEl.cloneNode(true),
+              );
             }
           }
         }
@@ -801,12 +850,19 @@
       "Transmitting snippet to FastAPI control plane (http://127.0.0.1:8000)...",
     );
 
-    const userContext = document.getElementById("ag-user-context-input")?.value || "";
+    const userContext =
+      document.getElementById("ag-user-context-input")?.value || "";
     const webpageContext = {
       url: window.location.href,
       title: document.title || "",
-      description: document.querySelector('meta[name="description"]')?.getAttribute("content") || "",
-      keywords: document.querySelector('meta[name="keywords"]')?.getAttribute("content") || ""
+      description:
+        document
+          .querySelector('meta[name="description"]')
+          ?.getAttribute("content") || "",
+      keywords:
+        document
+          .querySelector('meta[name="keywords"]')
+          ?.getAttribute("content") || "",
     };
 
     fetchFromBackend("http://127.0.0.1:8000/api/generate-parser", "POST", {
@@ -874,7 +930,7 @@
     try {
       chrome.storage.local.get(["ag_saved_parsers"], (result) => {
         let parsers = result.ag_saved_parsers || [];
-        
+
         const newParser = {
           id: "parser_" + Date.now(),
           url: window.location.href,
@@ -887,14 +943,15 @@
           detail_steps_enabled: detailStepsEnabled,
           expand_steps: expandSteps,
           close_steps: closeSteps,
-          modal_selector: modalSelector
+          modal_selector: modalSelector,
         };
 
-        const existingIdx = parsers.findIndex(p => p.code === code);
+        const existingIdx = parsers.findIndex((p) => p.code === code);
         if (existingIdx !== -1) {
           parsers[existingIdx].timestamp = Date.now();
           parsers[existingIdx].url = window.location.href;
-          parsers[existingIdx].title = document.title || window.location.hostname;
+          parsers[existingIdx].title =
+            document.title || window.location.hostname;
           parsers[existingIdx].deduplication_keys = dedupKeys || ["title"];
           parsers[existingIdx].detail_steps_enabled = detailStepsEnabled;
           parsers[existingIdx].expand_steps = expandSteps;
@@ -915,6 +972,24 @@
     } catch (e) {
       addPanelLog(`Failed to auto-save parser: ${e.message}`, "error");
     }
+  }
+
+  /**
+   * Generates a signature of the current page content to detect updates
+   */
+  function getPageSignature() {
+    if (selectedParent) {
+      try {
+        const children = Array.from(selectedParent.children);
+        return children
+          .slice(0, 3)
+          .map((c) => c.textContent.trim())
+          .join("|");
+      } catch (e) {
+        // Fallback
+      }
+    }
+    return document.body ? document.body.textContent.slice(0, 500) : "";
   }
 
   /**
@@ -961,22 +1036,29 @@
         unique_key: deduplicationKeys[0] || "title",
         unique_keys: deduplicationKeys,
         delay: delay,
+        last_signature: getPageSignature(),
       };
 
       if (isContextValid() && chrome.storage && chrome.storage.local) {
         try {
           isPaginationActive = true;
           updateCodegenButtonState();
-          chrome.storage.local.set({ ag_pagination_state: paginationState }, () => {
-            runPaginationLoop();
-          });
+          chrome.storage.local.set(
+            { ag_pagination_state: paginationState },
+            () => {
+              runPaginationLoop();
+            },
+          );
         } catch (e) {
           isPaginationActive = false;
           updateCodegenButtonState();
           addPanelLog("Failed to write state: context invalidated.", "error");
         }
       } else {
-        addPanelLog("Extension context is invalid. Please reload the page.", "error");
+        addPanelLog(
+          "Extension context is invalid. Please reload the page.",
+          "error",
+        );
       }
       return;
     }
@@ -1038,7 +1120,10 @@
    */
   function runPaginationLoop() {
     if (!isContextValid() || !chrome.storage || !chrome.storage.local) {
-      addPanelLog("Extension context is invalid. Aborting pagination loop.", "error");
+      addPanelLog(
+        "Extension context is invalid. Aborting pagination loop.",
+        "error",
+      );
       isPaginationActive = false;
       updateCodegenButtonState();
       return;
@@ -1058,7 +1143,13 @@
           return;
         }
 
-        const nextBtn = document.querySelector(state.next_selector);
+        let nextBtn = document.querySelector(state.next_selector);
+        if (nextBtn) {
+          const clickableParent = nextBtn.closest("a, button");
+          if (clickableParent) {
+            nextBtn = clickableParent;
+          }
+        }
         if (!nextBtn) {
           addPanelLog(
             `Next page button not found using selector: '${state.next_selector}'. Completing extraction early with ${state.collected_html.length} pages.`,
@@ -1077,18 +1168,51 @@
         if (isContextValid() && chrome.storage && chrome.storage.local) {
           try {
             chrome.storage.local.set({ ag_pagination_state: state }, () => {
-              nextBtn.click();
+              if (
+                nextBtn.tagName === "A" &&
+                nextBtn.href &&
+                !nextBtn.href.startsWith("javascript:")
+              ) {
+                addPanelLog(`Manually navigating to: ${nextBtn.href}`, "info");
+                window.location.href = nextBtn.href;
+              } else {
+                nextBtn.click();
+              }
 
-              setTimeout(() => {
-                if (isContextValid() && chrome.storage && chrome.storage.local) {
+              let retries = 0;
+              const maxRetries = 25; // 25 * 200ms = 5 seconds
+
+              function checkSPAUpdate() {
+                if (isUnloading) return;
+                if (
+                  isContextValid() &&
+                  chrome.storage &&
+                  chrome.storage.local
+                ) {
                   try {
                     chrome.storage.local.get(["ag_pagination_state"], (res) => {
-                      const current_state = res ? res.ag_pagination_state : null;
+                      const current_state = res
+                        ? res.ag_pagination_state
+                        : null;
                       if (
                         current_state &&
                         current_state.active &&
                         current_state.current_page === state.current_page
                       ) {
+                        const currentSignature = getPageSignature();
+                        if (
+                          currentSignature === current_state.last_signature &&
+                          retries < maxRetries
+                        ) {
+                          retries++;
+                          addPanelLog(
+                            `Waiting for page content to update (retry ${retries}/${maxRetries})...`,
+                            "info",
+                          );
+                          paginationTimeoutId = setTimeout(checkSPAUpdate, 200);
+                          return;
+                        }
+
                         addPanelLog(
                           `SPA/AJAX update detected. Capturing Page ${current_state.current_page}...`,
                           "info",
@@ -1096,7 +1220,12 @@
                         (async () => {
                           const expandedHtml = await getExpandedPageHtml();
                           current_state.collected_html.push(expandedHtml);
-                          if (isContextValid() && chrome.storage && chrome.storage.local) {
+                          current_state.last_signature = currentSignature;
+                          if (
+                            isContextValid() &&
+                            chrome.storage &&
+                            chrome.storage.local
+                          ) {
                             try {
                               chrome.storage.local.set(
                                 { ag_pagination_state: current_state },
@@ -1105,17 +1234,25 @@
                                 },
                               );
                             } catch (e) {
-                              addPanelLog("Failed to write state: context invalidated.", "error");
+                              addPanelLog(
+                                "Failed to write state: context invalidated.",
+                                "error",
+                              );
                             }
                           }
                         })();
                       }
                     });
                   } catch (e) {
-                    addPanelLog("Failed to read state: context invalidated.", "error");
+                    addPanelLog(
+                      "Failed to read state: context invalidated.",
+                      "error",
+                    );
                   }
                 }
-              }, state.delay);
+              }
+
+              paginationTimeoutId = setTimeout(checkSPAUpdate, state.delay);
             });
           } catch (e) {
             addPanelLog("Failed to write state: context invalidated.", "error");
@@ -1155,7 +1292,13 @@
   /**
    * Sends the collected page HTML array to the backend for unified parsing
    */
-  function submitAggregatedHtmls(htmls, code, collectionName, uniqueKey, uniqueKeys) {
+  function submitAggregatedHtmls(
+    htmls,
+    code,
+    collectionName,
+    uniqueKey,
+    uniqueKeys,
+  ) {
     addPanelLog(
       `Submitting ${htmls.length} aggregated pages for parser execution...`,
       "info",
@@ -1260,20 +1403,29 @@
             (async () => {
               const expandedHtml = await getExpandedPageHtml();
               state.collected_html.push(expandedHtml);
+              state.last_signature = getPageSignature();
               if (isContextValid() && chrome.storage && chrome.storage.local) {
                 try {
-                  chrome.storage.local.set({ ag_pagination_state: state }, () => {
-                    setTimeout(() => {
-                      runPaginationLoop();
-                    }, state.delay);
-                  });
+                  chrome.storage.local.set(
+                    { ag_pagination_state: state },
+                    () => {
+                      paginationTimeoutId = setTimeout(() => {
+                        if (isUnloading) return;
+                        runPaginationLoop();
+                      }, state.delay);
+                    },
+                  );
                 } catch (e) {
-                  addPanelLog("Failed to write resume state: context invalidated.", "error");
+                  addPanelLog(
+                    "Failed to write resume state: context invalidated.",
+                    "error",
+                  );
                 }
               }
             })();
           } else {
-            setTimeout(() => {
+            paginationTimeoutId = setTimeout(() => {
+              if (isUnloading) return;
               runPaginationLoop();
             }, state.delay);
           }
@@ -1295,8 +1447,8 @@
             phase: recordingPhase,
             expand_actions: recordedExpandActions,
             close_actions: recordedCloseActions,
-            last_action_time: lastActionTime
-          }
+            last_action_time: lastActionTime,
+          },
         });
       } catch (e) {
         // ignore
@@ -1315,8 +1467,12 @@
   }
 
   function getRecordingClickCount() {
-    const expandClicks = recordedExpandActions.filter(a => a.type === "click").length;
-    const closeClicks = recordedCloseActions.filter(a => a.type === "click").length;
+    const expandClicks = recordedExpandActions.filter(
+      (a) => a.type === "click",
+    ).length;
+    const closeClicks = recordedCloseActions.filter(
+      (a) => a.type === "click",
+    ).length;
     return expandClicks + closeClicks;
   }
 
@@ -1348,7 +1504,10 @@
     isSelectingTargetAfterRecord = true;
     removeRecorderBar();
     clearRecordingState();
-    addPanelLog("Action recording finalized. Please hover and click the item element to define scope.", "success");
+    addPanelLog(
+      "Action recording finalized. Please hover and click the item element to define scope.",
+      "success",
+    );
   }
 
   function showRecorderBar() {
@@ -1485,35 +1644,39 @@
 
     document.body.appendChild(bar);
 
-    document.getElementById("ag-rec-toggle-phase-btn").addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      toggleRecordingPhase();
-      updateRecorderBarUI();
+    document
+      .getElementById("ag-rec-toggle-phase-btn")
+      .addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleRecordingPhase();
+        updateRecorderBarUI();
 
-      if (isContextValid()) {
-        try {
-          chrome.runtime.sendMessage({
-            action: "actionRecorded",
-            phase: recordingPhase,
-            count: getRecordingClickCount(),
-            elementTag: "phase-toggle"
-          });
-        } catch (err) {}
-      }
-    });
+        if (isContextValid()) {
+          try {
+            chrome.runtime.sendMessage({
+              action: "actionRecorded",
+              phase: recordingPhase,
+              count: getRecordingClickCount(),
+              elementTag: "phase-toggle",
+            });
+          } catch (err) {}
+        }
+      });
 
-    document.getElementById("ag-rec-finalize-btn").addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      finalizeRecordingSession();
+    document
+      .getElementById("ag-rec-finalize-btn")
+      .addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        finalizeRecordingSession();
 
-      if (isContextValid()) {
-        try {
-          chrome.runtime.sendMessage({ action: "recordingFinalized" });
-        } catch (err) {}
-      }
-    });
+        if (isContextValid()) {
+          try {
+            chrome.runtime.sendMessage({ action: "recordingFinalized" });
+          } catch (err) {}
+        }
+      });
 
     updateRecorderBarUI();
   }
@@ -1524,14 +1687,19 @@
     const toggleBtn = document.getElementById("ag-rec-toggle-phase-btn");
 
     if (phaseText) {
-      phaseText.textContent = recordingPhase === "expand" ? "Expand Steps" : "Close Steps";
-      phaseText.style.color = recordingPhase === "expand" ? "#fb923c" : "#f87171";
+      phaseText.textContent =
+        recordingPhase === "expand" ? "Expand Steps" : "Close Steps";
+      phaseText.style.color =
+        recordingPhase === "expand" ? "#fb923c" : "#f87171";
     }
     if (countText) {
       countText.textContent = getRecordingClickCount();
     }
     if (toggleBtn) {
-      toggleBtn.textContent = recordingPhase === "expand" ? "[Switch to Close Steps]" : "[Switch to Expand Steps]";
+      toggleBtn.textContent =
+        recordingPhase === "expand"
+          ? "[Switch to Close Steps]"
+          : "[Switch to Expand Steps]";
     }
   }
 
@@ -1621,20 +1789,28 @@
   function getItemContainerOfClicked(clicked, parent) {
     if (!parent || !clicked || !parent.contains(clicked)) return null;
     let cur = clicked;
-    while (cur && cur.parentElement !== parent && cur.parentElement !== document.body) {
+    while (
+      cur &&
+      cur.parentElement !== parent &&
+      cur.parentElement !== document.body
+    ) {
       cur = cur.parentElement;
     }
     return cur;
   }
 
   function processRecordedActions(parent) {
-    if (recordedExpandActions.length === 0 && recordedCloseActions.length === 0) return;
+    if (recordedExpandActions.length === 0 && recordedCloseActions.length === 0)
+      return;
 
     const itemContainer = getItemContainerOfClicked(clickedElement, parent);
-    
-    expandSteps = mapRecordedActionsToSteps(recordedExpandActions, itemContainer);
+
+    expandSteps = mapRecordedActionsToSteps(
+      recordedExpandActions,
+      itemContainer,
+    );
     closeSteps = mapRecordedActionsToSteps(recordedCloseActions, itemContainer);
-    
+
     detailStepsEnabled = true;
 
     // Refresh UI
@@ -1643,9 +1819,11 @@
 
   function mapRecordedActionsToSteps(actions, itemContainer) {
     const steps = [];
-    const parentSelector = itemContainer ? generateFullUniqueCssSelector(itemContainer) : null;
+    const parentSelector = itemContainer
+      ? generateFullUniqueCssSelector(itemContainer)
+      : null;
 
-    actions.forEach(action => {
+    actions.forEach((action) => {
       if (action.type === "wait") {
         steps.push({ type: "wait", target: action.target });
       } else if (action.type === "click") {
@@ -1655,19 +1833,32 @@
         if (action.element && action.element.isConnected && itemContainer) {
           if (itemContainer.contains(action.element)) {
             isInside = true;
-            relativeSelector = generateRelativeCssSelector(action.element, itemContainer);
+            relativeSelector = generateRelativeCssSelector(
+              action.element,
+              itemContainer,
+            );
           }
         } else if (parentSelector && action.fullSelector) {
-          if (action.fullSelector === parentSelector || action.fullSelector.startsWith(parentSelector + " > ")) {
+          if (
+            action.fullSelector === parentSelector ||
+            action.fullSelector.startsWith(parentSelector + " > ")
+          ) {
             isInside = true;
-            relativeSelector = getRelativeSelector(action.fullSelector, parentSelector, itemContainer);
+            relativeSelector = getRelativeSelector(
+              action.fullSelector,
+              parentSelector,
+              itemContainer,
+            );
           }
         }
 
         if (isInside) {
           steps.push({ type: "click_relative", target: relativeSelector });
         } else {
-          steps.push({ type: "click_absolute", target: action.selector || action.fullSelector });
+          steps.push({
+            type: "click_absolute",
+            target: action.selector || action.fullSelector,
+          });
         }
       }
     });
@@ -1708,7 +1899,7 @@
       display: "flex",
       gap: "6px",
       alignItems: "center",
-      marginTop: "4px"
+      marginTop: "4px",
     });
     row.setAttribute("data-phase", phase);
     row.setAttribute("data-index", idx);
@@ -1719,16 +1910,20 @@
 
     row.innerHTML = `
       <select class="ag-input ag-step-type" style="flex: 1.2; height: 28px; padding: 2px 4px; font-size: 9px; line-height: 1.2;">
-        <option value="click_relative" ${step.type === 'click_relative' ? 'selected' : ''}>Click (Rel)</option>
-        <option value="click_absolute" ${step.type === 'click_absolute' ? 'selected' : ''}>Click (Abs)</option>
-        <option value="wait" ${step.type === 'wait' ? 'selected' : ''}>Wait (ms)</option>
+        <option value="click_relative" ${step.type === "click_relative" ? "selected" : ""}>Click (Rel)</option>
+        <option value="click_absolute" ${step.type === "click_absolute" ? "selected" : ""}>Click (Abs)</option>
+        <option value="wait" ${step.type === "wait" ? "selected" : ""}>Wait (ms)</option>
       </select>
-      <input type="text" class="ag-input ag-step-target" placeholder="${placeholder}" value="${step.target || ''}" style="flex: 2; height: 28px; font-size: 9.5px; line-height: 1.2;">
-      ${step.type !== 'wait' ? `
+      <input type="text" class="ag-input ag-step-target" placeholder="${placeholder}" value="${step.target || ""}" style="flex: 2; height: 28px; font-size: 9.5px; line-height: 1.2;">
+      ${
+        step.type !== "wait"
+          ? `
         <button class="ag-btn ag-btn-secondary ag-pick-step-btn" style="flex: 0.4; height: 28px; padding: 0 4px; min-height: 28px; font-size: 9px;">
           Pick
         </button>
-      ` : ''}
+      `
+          : ""
+      }
       <button class="ag-btn ag-btn-secondary ag-delete-step-btn" style="flex: 0.3; height: 28px; padding: 0; min-height: 28px; color: var(--color-brand-rose); font-size: 14px; font-weight: bold;">
         &times;
       </button>
@@ -1774,9 +1969,14 @@
   function startPickingForStep(phase, idx) {
     pickingStepIndex = `${phase}_${idx}`;
     hoverEnabled = true;
-    addPanelLog(`Click on the target element on the page to set selector...`, "info");
-    
-    const row = document.querySelector(`.ag-step-row[data-phase="${phase}"][data-index="${idx}"]`);
+    addPanelLog(
+      `Click on the target element on the page to set selector...`,
+      "info",
+    );
+
+    const row = document.querySelector(
+      `.ag-step-row[data-phase="${phase}"][data-index="${idx}"]`,
+    );
     if (row) {
       const pickBtn = row.querySelector(".ag-pick-step-btn");
       if (pickBtn) {
@@ -1789,8 +1989,11 @@
   function startPickingForModal() {
     pickingStepIndex = "modal";
     hoverEnabled = true;
-    addPanelLog(`Click on the modal/popup element on the page to set selector...`, "info");
-    
+    addPanelLog(
+      `Click on the modal/popup element on the page to set selector...`,
+      "info",
+    );
+
     const pickBtn = document.getElementById("ag-pick-modal-btn");
     if (pickBtn) {
       pickBtn.textContent = "Click...";
@@ -1807,7 +2010,10 @@
             target.scrollIntoView({ block: "nearest" });
             target.click();
           } else {
-            addPanelLog(`  [Step warning] Relative target not found: '${step.target}'`, "error");
+            addPanelLog(
+              `  [Step warning] Relative target not found: '${step.target}'`,
+              "error",
+            );
           }
         }
       } else if (step.type === "click_absolute") {
@@ -1817,41 +2023,56 @@
             target.scrollIntoView({ block: "nearest" });
             target.click();
           } else {
-            addPanelLog(`  [Step warning] Absolute target not found: '${step.target}'`, "error");
+            addPanelLog(
+              `  [Step warning] Absolute target not found: '${step.target}'`,
+              "error",
+            );
           }
         }
       } else if (step.type === "wait") {
         const ms = parseInt(step.target, 10) || 500;
-        await new Promise(resolve => setTimeout(resolve, ms));
+        await new Promise((resolve) => setTimeout(resolve, ms));
       }
     }
   }
 
   async function getExpandedPageHtml() {
-    if (!detailStepsEnabled || (expandSteps.length === 0 && closeSteps.length === 0)) {
+    if (
+      !detailStepsEnabled ||
+      (expandSteps.length === 0 && closeSteps.length === 0)
+    ) {
       return document.documentElement.outerHTML;
     }
 
     const itemSel = inferredSelectors?.item_selector;
     if (!itemSel) {
-      addPanelLog("Warning: No item selector found. Skipping detail steps.", "error");
+      addPanelLog(
+        "Warning: No item selector found. Skipping detail steps.",
+        "error",
+      );
       return document.documentElement.outerHTML;
     }
 
     const items = Array.from(document.querySelectorAll(itemSel));
     if (items.length === 0) {
-      addPanelLog(`No items found matching selector: '${itemSel}'. Skipping detail steps.`, "info");
+      addPanelLog(
+        `No items found matching selector: '${itemSel}'. Skipping detail steps.`,
+        "info",
+      );
       return document.documentElement.outerHTML;
     }
 
-    addPanelLog(`Executing detail expansion for ${items.length} items on page...`, "info");
+    addPanelLog(
+      `Executing detail expansion for ${items.length} items on page...`,
+      "info",
+    );
 
     const expandedItemHtmls = [];
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       addPanelLog(`  Expanding item ${i + 1}/${items.length}...`, "info");
-      
+
       await executeStepsForElement(item, expandSteps);
 
       const itemClone = item.cloneNode(true);
@@ -1869,7 +2090,7 @@
     }
 
     const pageClone = document.documentElement.cloneNode(true);
-    
+
     const panelInClone = pageClone.querySelector("#antigravity-depth-panel");
     if (panelInClone) panelInClone.remove();
 
@@ -2525,7 +2746,11 @@
         detailStepsEnabled = e.target.checked;
         document.getElementById("ag-details-controls").style.display =
           detailStepsEnabled ? "flex" : "none";
-        if (detailStepsEnabled && expandSteps.length === 0 && closeSteps.length === 0) {
+        if (
+          detailStepsEnabled &&
+          expandSteps.length === 0 &&
+          closeSteps.length === 0
+        ) {
           // Add default relative click step
           expandSteps.push({ type: "click_relative", target: "" });
         }
@@ -2567,34 +2792,44 @@
 
   function checkAndResumeRecording() {
     if (isContextValid() && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(["ag_recording_state", "ag_extraction_mode"], (result) => {
-        if (result && result.ag_extraction_mode) {
-          extractionMode = result.ag_extraction_mode;
-        }
-        if (result && result.ag_recording_state && result.ag_recording_state.active) {
-          const state = result.ag_recording_state;
-          isRecording = true;
-          recordingPhase = state.phase || "expand";
-          recordedExpandActions = state.expand_actions || [];
-          recordedCloseActions = state.close_actions || [];
-          lastActionTime = state.last_action_time || Date.now();
-          
-          showRecorderBar();
-          addPanelLog("Resumed active Advanced Mode recording session.", "info");
-
-          // Sync with popup if it is open
-          if (isContextValid()) {
-            try {
-              chrome.runtime.sendMessage({
-                action: "actionRecorded",
-                phase: recordingPhase,
-                count: getRecordingClickCount(),
-                elementTag: "resume"
-              });
-            } catch (err) {}
+      chrome.storage.local.get(
+        ["ag_recording_state", "ag_extraction_mode"],
+        (result) => {
+          if (result && result.ag_extraction_mode) {
+            extractionMode = result.ag_extraction_mode;
           }
-        }
-      });
+          if (
+            result &&
+            result.ag_recording_state &&
+            result.ag_recording_state.active
+          ) {
+            const state = result.ag_recording_state;
+            isRecording = true;
+            recordingPhase = state.phase || "expand";
+            recordedExpandActions = state.expand_actions || [];
+            recordedCloseActions = state.close_actions || [];
+            lastActionTime = state.last_action_time || Date.now();
+
+            showRecorderBar();
+            addPanelLog(
+              "Resumed active Advanced Mode recording session.",
+              "info",
+            );
+
+            // Sync with popup if it is open
+            if (isContextValid()) {
+              try {
+                chrome.runtime.sendMessage({
+                  action: "actionRecorded",
+                  phase: recordingPhase,
+                  count: getRecordingClickCount(),
+                  elementTag: "resume",
+                });
+              } catch (err) {}
+            }
+          }
+        },
+      );
     }
   }
 
@@ -2607,7 +2842,7 @@
         recordingActive: isRecording,
         phase: recordingPhase,
         count: getRecordingClickCount(),
-        selectingTarget: isSelectingTargetAfterRecord
+        selectingTarget: isSelectingTargetAfterRecord,
       });
     } else if (message.action === "toggleHover") {
       extractionMode = message.mode || "simple";
@@ -2622,7 +2857,10 @@
           showRecorderBar();
           hoverEnabled = false;
           overlay.style.display = "none";
-          addPanelLog("Advanced Mode: Action recording session started.", "info");
+          addPanelLog(
+            "Advanced Mode: Action recording session started.",
+            "info",
+          );
         } else {
           cancelRecordingSession();
         }
@@ -2657,16 +2895,16 @@
       }
       generatedCode = message.code;
       inferredSelectors = message.selectors;
-      
+
       // Load saved detail steps if present
       detailStepsEnabled = message.detail_steps_enabled || false;
       expandSteps = message.expand_steps || [];
       closeSteps = message.close_steps || [];
       modalSelector = message.modal_selector || "";
-      
+
       document.getElementById("ag-code-view").textContent = generatedCode;
       document.getElementById("ag-execute-btn").disabled = false;
-      
+
       addPanelLog("Loaded saved parser from history!", "success");
       updateCodegenButtonState();
       renderDetailSteps();
