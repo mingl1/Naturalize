@@ -1,13 +1,13 @@
 # sdk_blueprint.py (Reference Interface)
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
 
 class ExtractedCatalogItem(BaseModel):
     title: str = Field(description="Clean text header of the listing")
-    price: float = Field(description="Normalized numerical price value")
-    source_url: str = Field(description="Fully qualified destination link")
+    price: Optional[float] = Field(default=None, description="Normalized numerical price value")
+    source_url: Optional[str] = Field(default=None, description="Fully qualified destination link")
     metadata: Dict[str, Any] = Field(
         default_factory=dict, description="Arbitrary layout key-values discovered"
     )

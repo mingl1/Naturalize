@@ -22,6 +22,10 @@ class SnippetGenerationRequest(BaseModel):
         default=None,
         description="Optional full page HTMLs to run dry-run validation tests against",
     )
+    collection_name: Optional[str] = Field(
+        default=None,
+        description="The name of the collection to add items to, for schema alignment context",
+    )
 
 
 class SnippetGenerationResponse(BaseModel):
@@ -89,6 +93,9 @@ class QueryCatalogRequest(BaseModel):
     user_prompt: str = Field(description="The natural language user query")
     user_id: Optional[str] = Field(
         default="user_default", description="User identifier"
+    )
+    collection_name: Optional[str] = Field(
+        default=None, description="Optional target collection name context"
     )
 
 

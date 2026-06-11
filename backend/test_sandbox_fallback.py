@@ -205,11 +205,76 @@ def test_save_items_to_db_compound_keys():
         assert isinstance(filter_doc3["_id"], ObjectId)
 
 
+def test_save_items_schema_alignment():
+    from unittest.mock import MagicMock
+    import database
+    from bson import ObjectId
+
+    # Mock DB client and collections
+    mock_db = MagicMock()
+    mock_items_col = MagicMock()
+    mock_db.items = mock_items_col
+
+    # Set up some existing documents that find() will return to simulate database state
+    existing_docs = [
+        {"user_id": ObjectId("60d5ec49f87c5131f47b2c5d"), "collection_name": "test_col", "title": "Old Item", "price": None, "source_url": None, "metadata": {"old_key": "old_val"}}
+    ]
+    mock_items_col.find.return_value.limit.return_value = existing_docs
+
+    with patch("database._get_db", return_value=mock_db):
+        user_id = ObjectId("60d5ec49f87c5131f47b2c5d")
+        
+        # New items with a new metadata field, and one missing the old metadata field
+        # Also testing optional price/source_url (one has price/url, other doesn't)
+        new_items = [
+            {"title": "New Item 1", "price": 12.5, "source_url": "https://example.com/new1", "metadata": {"new_key": "new_val"}},
+            {"title": "New Item 2", "metadata": {"old_key": "keep_val"}}
+        ]
+        
+        saved = database.save_items_to_db(
+            user_id=user_id,
+            collection_name="test_col",
+            items=new_items,
+            unique_key="title"
+        )
+        
+        # Verify save_items_to_db completed
+        assert saved == 2
+        
+        # Verify update_many was called to backfill existing items with 'new_key': None
+        mock_items_col.update_many.assert_called_once()
+        update_many_args = mock_items_col.update_many.call_args[0]
+        assert update_many_args[0]["collection_name"] == "test_col"
+        assert update_many_args[1]["$set"] == {"metadata.new_key": None}
+        
+        # Verify all incoming items had the union of keys applied
+        # Item 1 should have 'old_key': None added
+        # Item 2 should have 'new_key': None added, and price/source_url set to None
+        update_calls = mock_items_col.update_one.call_args_list
+        assert len(update_calls) == 2
+        
+        # First update_one payload check
+        first_update = update_calls[0][0][1]["$set"]
+        assert first_update["title"] == "New Item 1"
+        assert first_update["price"] == 12.5
+        assert first_update["source_url"] == "https://example.com/new1"
+        assert first_update["metadata"] == {"new_key": "new_val", "old_key": None}
+        
+        # Second update_one payload check
+        second_update = update_calls[1][0][1]["$set"]
+        assert second_update["title"] == "New Item 2"
+        assert second_update["price"] is None
+        assert second_update["source_url"] is None
+        assert second_update["metadata"] == {"old_key": "keep_val", "new_key": None}
+        print("Schema alignment and optional price/url test passed successfully!")
+
+
 if __name__ == "__main__":
     test_sandbox_fallback()
     test_save_items_to_db_falsy_key()
     test_save_items_to_db_duplicate_batch_keys()
     test_save_items_to_db_compound_keys()
+    test_save_items_schema_alignment()
 
 
 
